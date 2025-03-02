@@ -4,6 +4,9 @@
 const axios = require('axios');
 const logger = require('./logger');
 
+// Semaphore for IP update process
+let ipUpdateInProgress = false;
+
 class ConfigManager {
   constructor() {
     // Initialize IP cache first to avoid reference errors
@@ -92,14 +95,11 @@ class ConfigManager {
     this.pollInterval = parseInt(process.env.POLL_INTERVAL || '60000', 10);
     this.watchDockerEvents = process.env.WATCH_DOCKER_EVENTS !== 'false';
     this.cleanupOrphaned = process.env.CLEANUP_ORPHANED === 'true';
-
+    
     // Cache refresh interval in milliseconds (default: 1 hour)
-    this.cacheRefreshInterval = parseInt(process.env.DNS_CACHE_REFRESH_INTERVAL || '3600000', 10);    
+    this.cacheRefreshInterval = parseInt(process.env.DNS_CACHE_REFRESH_INTERVAL || '3600000', 10);
     
     // Schedule immediate IP update and then periodic refresh
-    this.ipRefreshInterval = parseInt(process.env.IP_REFRESH_INTERVAL || '3600000', 10);  // Default: 1 hour
-
-    // This update will happen asynchronously - the A record defaults will be updated
     this.updatePublicIPs().then(() => {
       // Update A record defaults after IP discovery
       this.recordDefaults.A.content = process.env.DNS_DEFAULT_A_CONTENT || this.ipCache.ipv4 || '';
@@ -163,34 +163,52 @@ class ConfigManager {
     return this.ipCache.ipv4;
   }
   
-    /**
-     * Update the public IP cache by calling external IP services
-     */
-    async updatePublicIPs() {
-      try {
-        // Use a flag to prevent duplicate logs of the same IP
-        const oldIpv4 = this.ipCache.ipv4;
-        
-        // Use environment variables if provided, otherwise fetch from IP service
-        let ipv4 = process.env.PUBLIC_IP;
-        let ipv6 = process.env.PUBLIC_IPV6;
+  /**
+   * Update the public IP cache by calling external IP services
+   * Uses a semaphore to prevent concurrent updates
+   */
+  async updatePublicIPs() {
+    // If an update is already in progress, wait for it to complete
+    if (ipUpdateInProgress) {
+      logger.debug('IP update already in progress, waiting...');
+      await new Promise(resolve => {
+        const checkInterval = setInterval(() => {
+          if (!ipUpdateInProgress) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+      });
+      return this.ipCache;
+    }
+    
+    ipUpdateInProgress = true;
+    
+    try {
+      // Remember old IPs to detect changes
+      const oldIpv4 = this.ipCache.ipv4;
+      const oldIpv6 = this.ipCache.ipv6;
       
-        // If IP not set via environment, fetch from service
-        if (!ipv4) {
+      // Use environment variables if provided, otherwise fetch from IP service
+      let ipv4 = process.env.PUBLIC_IP;
+      let ipv6 = process.env.PUBLIC_IPV6;
+      
+      // If IP not set via environment, fetch from service
+      if (!ipv4) {
+        try {
+          // First try ipify.org
+          const response = await axios.get('https://api.ipify.org', { timeout: 5000 });
+          ipv4 = response.data;
+        } catch (error) {
+          // Fallback to ifconfig.me if ipify fails
           try {
-            // First try ipify.org
-            const response = await axios.get('https://api.ipify.org', { timeout: 5000 });
+            const response = await axios.get('https://ifconfig.me/ip', { timeout: 5000 });
             ipv4 = response.data;
-          } catch (error) {
-            // Fallback to ifconfig.me if ipify fails
-            try {
-              const response = await axios.get('https://ifconfig.me/ip', { timeout: 5000 });
-              ipv4 = response.data;
-            } catch (fallbackError) {
-              logger.error(`Failed to fetch public IPv4 address: ${fallbackError.message}`);
-            }
+          } catch (fallbackError) {
+            logger.error(`Failed to fetch public IPv4 address: ${fallbackError.message}`);
           }
         }
+      }
       
       // Try to get IPv6 if not set in environment
       if (!ipv6) {
@@ -210,11 +228,13 @@ class ConfigManager {
         lastCheck: Date.now()
       };
       
-      // Only log if the IP has changed
+      // Only log once if IP has changed
       if (ipv4 && ipv4 !== oldIpv4) {
-        logger.info(`Public IPv4: ${ipv4}`);
+        // Log directly to console to ensure just one message
+        console.log(`${new Date().toISOString()} [INFO] Public IPv4: ${ipv4}`);
       }
-      if (ipv6 && ipv6 !== this.ipCache.ipv6) {
+      
+      if (ipv6 && ipv6 !== oldIpv6) {
         logger.debug(`Public IPv6: ${ipv6}`);
       }
       
@@ -222,6 +242,8 @@ class ConfigManager {
     } catch (error) {
       logger.error(`Error updating public IPs: ${error.message}`);
       return this.ipCache;
+    } finally {
+      ipUpdateInProgress = false;
     }
   }
 }
