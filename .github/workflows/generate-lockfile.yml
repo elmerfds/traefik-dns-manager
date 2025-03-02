@@ -1,0 +1,38 @@
+name: Generate package-lock.json
+
+on:
+  workflow_dispatch:  # Allow manual triggering
+  push:
+    paths:
+      - 'package.json'
+      - '!package-lock.json'
+    branches:
+      - main
+      - master
+
+jobs:
+  generate-lockfile:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Generate package-lock.json
+        run: npm install --package-lock-only
+      
+      - name: Commit package-lock.json
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add package-lock.json
+          git commit -m "chore: generate package-lock.json [skip ci]" || echo "No changes to commit"
+          git push

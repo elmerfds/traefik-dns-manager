@@ -8,11 +8,13 @@ on:
     paths-ignore:
       - 'README.md'
       - '**.md'
+      - '.github/workflows/**'
   pull_request:
     branches: [ main, master ]
     paths-ignore:
       - 'README.md'
       - '**.md'
+      - '.github/workflows/**'
 
 jobs:
   build-and-push:
@@ -65,7 +67,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      
+          
       - name: Check image size
         if: github.event_name != 'pull_request'
         run: |
