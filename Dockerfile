@@ -3,9 +3,11 @@ FROM node:20-alpine
 # Create app directory
 WORKDIR /app
 
-# Install app dependencies
+# Copy package files first to leverage Docker cache
 COPY package*.json ./
-RUN npm ci --only=production
+
+# If package-lock.json exists, use ci, otherwise use install
+RUN test -f package-lock.json && npm ci --omit=dev || npm install --omit=dev
 
 # Bundle app source
 COPY src ./src
