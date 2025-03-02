@@ -84,11 +84,11 @@ This will create a CNAME record for `app.example.com` pointing to your domain.
 
 ```yaml
 services:
-  plex:
-    image: linuxserver/plex
+  my-service:
+    image: my-image
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.plex.rule=Host(`plex.example.com`)"
+      - "traefik.http.routers.my-service.rule=Host(`service.example.com`)"
       - "dns.cloudflare.proxied=false"  # Disable Cloudflare proxy
 ```
 
@@ -229,7 +229,7 @@ The DNS Manager automatically detects apex domains (e.g., `example.com`) and use
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/traefik-dns-manager.git
+git clone https://github.com/elmerfds/traefik-dns-manager.git
 cd traefik-dns-manager
 
 # Build the Docker image
