@@ -3,6 +3,13 @@
  */
 class ConfigManager {
   constructor() {
+    // Initialize IP cache first to avoid reference errors
+    this.ipCache = {
+      ipv4: process.env.PUBLIC_IP || null,
+      ipv6: process.env.PUBLIC_IPV6 || null,
+      lastCheck: 0
+    };
+    
     // Required Cloudflare settings
     this.cloudflareToken = process.env.CLOUDFLARE_TOKEN;
     this.cloudflareZone = process.env.CLOUDFLARE_ZONE;
@@ -82,13 +89,6 @@ class ConfigManager {
     this.pollInterval = parseInt(process.env.POLL_INTERVAL || '60000', 10);
     this.watchDockerEvents = process.env.WATCH_DOCKER_EVENTS !== 'false';
     this.cleanupOrphaned = process.env.CLEANUP_ORPHANED === 'true';
-    
-    // IP sync cache - actual implementation would use a proper IP service
-    this.ipCache = {
-      ipv4: process.env.PUBLIC_IP || null,
-      ipv6: process.env.PUBLIC_IPV6 || null,
-      lastCheck: 0
-    };
   }
   
   /**
@@ -106,14 +106,14 @@ class ConfigManager {
    * Get public IPv4 address synchronously (from cache)
    */
   getPublicIPSync() {
-    return this.ipCache.ipv4;
+    return this.ipCache?.ipv4 || null;
   }
   
   /**
    * Get public IPv6 address synchronously (from cache)
    */
   getPublicIPv6Sync() {
-    return this.ipCache.ipv6;
+    return this.ipCache?.ipv6 || null;
   }
   
   /**
