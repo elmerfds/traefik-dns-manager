@@ -11,7 +11,7 @@ A service that automatically manages Cloudflare DNS records based on Traefik rou
 - 🎛️ Fine-grained control with service-specific labels
 - 💪 Fault-tolerant design with retry mechanisms
 - 🧹 Optional cleanup of orphaned DNS records
-- 📊 Optimized performance with DNS caching and batch processing
+- 📊 Optimised performance with DNS caching and batch processing
 - 🖨️ Configurable logging levels for better troubleshooting
 
 ## Quick Start
@@ -198,9 +198,9 @@ The INFO level uses special formatting with emojis for better readability:
 ✅ Traefik DNS Manager running successfully
 ```
 
-## Performance Optimization
+## Performance Optimisation
 
-The application includes built-in performance optimizations to reduce API calls and improve efficiency:
+The application includes built-in performance optimisations to reduce API calls and improve efficiency:
 
 ### DNS Caching
 
