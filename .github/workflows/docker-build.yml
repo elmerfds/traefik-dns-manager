@@ -1,11 +1,18 @@
 name: Build and Publish Docker Image
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, master ]
     tags: [ 'v*' ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
   pull_request:
     branches: [ main, master ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
 
 jobs:
   build-and-push:
