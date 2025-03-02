@@ -28,6 +28,10 @@ services:
       
       # Optional public IP (used for A records)
       - PUBLIC_IP=${PUBLIC_IP:-}
+      
+      # Logging and cache settings
+      - LOG_LEVEL=INFO
+      - DNS_CACHE_REFRESH_INTERVAL=3600000  # 1 hour in milliseconds
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:

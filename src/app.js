@@ -71,6 +71,9 @@ async function pollTraefikAPI() {
     // Track processed hostnames for cleanup
     const processedHostnames = [];
     
+    // Collect all DNS record configurations to batch process
+    const dnsRecordConfigs = [];
+    
     // Count total hostnames to process
     let totalHostnames = 0;
     Object.values(routers).forEach(router => {
@@ -81,7 +84,7 @@ async function pollTraefikAPI() {
     
     logger.info(`Processing ${totalHostnames} hostnames for DNS management`);
     
-    // Process each router
+    // Process each router to collect DNS configurations
     for (const [routerName, router] of Object.entries(routers)) {
       if (router.rule && router.rule.includes('Host')) {
         // Extract all hostnames from the rule
@@ -112,15 +115,21 @@ async function pollTraefikAPI() {
               fqdn
             );
             
-            // Ensure DNS record exists
-            const result = await cloudflare.ensureRecord(recordConfig);
-            logger.debug(`Processed hostname: ${fqdn} as ${recordConfig.type} record`);
+            // Add to batch instead of processing immediately
+            dnsRecordConfigs.push(recordConfig);
+            
           } catch (error) {
             global.statsCounter.errors++;
             logger.error(`Error processing hostname ${hostname}: ${error.message}`);
           }
         }
       }
+    }
+    
+    // Batch process all DNS records
+    if (dnsRecordConfigs.length > 0) {
+      logger.debug(`Batch processing ${dnsRecordConfigs.length} DNS record configurations`);
+      await cloudflare.batchEnsureRecords(dnsRecordConfigs);
     }
     
     // Log summary stats if we have records
@@ -229,8 +238,8 @@ async function cleanupOrphanedRecords(activeHostnames) {
   try {
     logger.debug('Checking for orphaned DNS records...');
     
-    // Get all DNS records for our zone
-    const allRecords = await cloudflare.listRecords();
+    // Get all DNS records for our zone (from cache when possible)
+    const allRecords = await cloudflare.getRecordsFromCache();
     
     // Find records that were created by this tool but no longer exist in Traefik
     const orphanedRecords = allRecords.filter(record => {

@@ -1,5 +1,6 @@
 /**
  * Cloudflare API client for DNS management
+ * Includes DNS record caching to reduce API calls
  */
 const axios = require('axios');
 const logger = require('./logger');
@@ -10,6 +11,15 @@ class CloudflareAPI {
     this.token = config.cloudflareToken;
     this.zone = config.cloudflareZone;
     this.zoneId = null;
+    
+    // Initialize record cache
+    this.recordCache = {
+      records: [],
+      lastUpdated: 0
+    };
+    
+    // Cache refresh interval in milliseconds (default: 1 hour)
+    this.cacheRefreshInterval = parseInt(process.env.DNS_CACHE_REFRESH_INTERVAL || '3600000', 10);
     
     this.client = axios.create({
       baseURL: 'https://api.cloudflare.com/client/v4',
@@ -39,6 +49,9 @@ class CloudflareAPI {
       logger.debug(`Cloudflare zone ID for ${this.zone}: ${this.zoneId}`);
       logger.success('Cloudflare zone authenticated successfully');
       
+      // Initialize the DNS record cache
+      await this.refreshRecordCache();
+      
       return true;
     } catch (error) {
       logger.error(`Failed to initialize Cloudflare API: ${error.message}`);
@@ -47,19 +60,142 @@ class CloudflareAPI {
   }
   
   /**
+   * Refresh the DNS record cache
+   */
+  async refreshRecordCache() {
+    try {
+      logger.debug('Refreshing DNS record cache from Cloudflare');
+      
+      if (!this.zoneId) {
+        await this.init();
+        return;
+      }
+      
+      // Get all records for the zone in one API call
+      const response = await this.client.get(`/zones/${this.zoneId}/dns_records`, {
+        params: { per_page: 100 } // Get as many records as possible in one request
+      });
+      
+      this.recordCache = {
+        records: response.data.result,
+        lastUpdated: Date.now()
+      };
+      
+      logger.debug(`Cached ${this.recordCache.records.length} DNS records from Cloudflare`);
+      
+      // If there are more records (pagination), fetch them as well
+      let nextPage = response.data.result_info?.next_page_url;
+      while (nextPage) {
+        logger.debug(`Fetching additional DNS records page from Cloudflare`);
+        const pageResponse = await axios.get(nextPage, {
+          headers: this.client.defaults.headers
+        });
+        
+        this.recordCache.records = [
+          ...this.recordCache.records,
+          ...pageResponse.data.result
+        ];
+        
+        nextPage = pageResponse.data.result_info?.next_page_url;
+      }
+      
+      logger.debug(`DNS record cache now contains ${this.recordCache.records.length} records`);
+      
+      return this.recordCache.records;
+    } catch (error) {
+      logger.error(`Failed to refresh DNS record cache: ${error.message}`);
+      throw error;
+    }
+  }
+  
+  /**
+   * Get records from cache, refreshing if necessary
+   */
+  async getRecordsFromCache(forceRefresh = false) {
+    // Check if cache is stale or if force refresh is requested
+    const cacheAge = Date.now() - this.recordCache.lastUpdated;
+    if (forceRefresh || cacheAge > this.cacheRefreshInterval || this.recordCache.records.length === 0) {
+      await this.refreshRecordCache();
+    }
+    
+    return this.recordCache.records;
+  }
+  
+  /**
+   * Find a record in the cache
+   */
+  findRecordInCache(type, name) {
+    return this.recordCache.records.find(
+      record => record.type === type && record.name === name
+    );
+  }
+  
+  /**
+   * Update a record in the cache
+   */
+  updateRecordInCache(record) {
+    const index = this.recordCache.records.findIndex(
+      r => r.id === record.id
+    );
+    
+    if (index !== -1) {
+      this.recordCache.records[index] = record;
+    } else {
+      this.recordCache.records.push(record);
+    }
+  }
+  
+  /**
+   * Remove a record from the cache
+   */
+  removeRecordFromCache(id) {
+    this.recordCache.records = this.recordCache.records.filter(
+      record => record.id !== id
+    );
+  }
+  
+  /**
    * List DNS records with optional filtering
+   * Uses cache when possible, falls back to API if necessary
    */
   async listRecords(params = {}) {
     try {
-      if (!this.zoneId) {
-        await this.init();
+      // If specific filters are used other than type and name, bypass cache
+      const bypassCache = Object.keys(params).some(
+        key => !['type', 'name'].includes(key)
+      );
+      
+      if (bypassCache) {
+        logger.debug('Bypassing cache due to complex filters');
+        
+        if (!this.zoneId) {
+          await this.init();
+        }
+        
+        const response = await this.client.get(`/zones/${this.zoneId}/dns_records`, {
+          params
+        });
+        
+        return response.data.result;
       }
       
-      const response = await this.client.get(`/zones/${this.zoneId}/dns_records`, {
-        params
-      });
+      // Use cache for simple type/name filtering
+      const records = await this.getRecordsFromCache();
       
-      return response.data.result;
+      // Apply filters
+      return records.filter(record => {
+        let match = true;
+        
+        if (params.type && record.type !== params.type) {
+          match = false;
+        }
+        
+        if (params.name && record.name !== params.name) {
+          match = false;
+        }
+        
+        return match;
+      });
     } catch (error) {
       logger.error(`Failed to list DNS records: ${error.message}`);
       throw error;
@@ -85,6 +221,9 @@ class CloudflareAPI {
         `/zones/${this.zoneId}/dns_records`,
         recordWithComment
       );
+      
+      // Update the cache with the new record
+      this.updateRecordInCache(response.data.result);
       
       logger.success(`Created ${record.type} record for ${record.name}`);
       
@@ -120,6 +259,9 @@ class CloudflareAPI {
         recordWithComment
       );
       
+      // Update the cache
+      this.updateRecordInCache(response.data.result);
+      
       logger.success(`Updated ${record.type} record for ${record.name}`);
       
       // Update stats counter if available
@@ -144,6 +286,10 @@ class CloudflareAPI {
       }
       
       await this.client.delete(`/zones/${this.zoneId}/dns_records/${id}`);
+      
+      // Update the cache
+      this.removeRecordFromCache(id);
+      
       logger.debug(`Deleted DNS record with ID ${id}`);
       return true;
     } catch (error) {
@@ -153,7 +299,132 @@ class CloudflareAPI {
   }
   
   /**
+   * Batch process multiple DNS records at once
+   * This significantly reduces API calls by processing all changes together
+   */
+  async batchEnsureRecords(recordConfigs) {
+    if (!recordConfigs || recordConfigs.length === 0) {
+      return [];
+    }
+    
+    logger.debug(`Batch processing ${recordConfigs.length} DNS records`);
+    
+    try {
+      // Refresh cache if needed
+      await this.getRecordsFromCache();
+      
+      // Process each record configuration
+      const results = [];
+      const pendingChanges = {
+        create: [],
+        update: [],
+        unchanged: []
+      };
+      
+      // First pass: examine all records and sort into categories
+      for (const recordConfig of recordConfigs) {
+        try {
+          // Handle apex domains that need IP lookup
+          if ((recordConfig.needsIpLookup || recordConfig.content === 'pending') && recordConfig.type === 'A') {
+            // Get public IP asynchronously
+            const ip = await this.config.getPublicIP();
+            if (ip) {
+              recordConfig.content = ip;
+              logger.debug(`Retrieved public IP for apex domain ${recordConfig.name}: ${ip}`);
+            } else {
+              throw new Error(`Unable to determine public IP for apex domain A record: ${recordConfig.name}`);
+            }
+            // Remove the flag to avoid confusion
+            delete recordConfig.needsIpLookup;
+          }
+          
+          // Validate the record
+          this.validateRecord(recordConfig);
+          
+          // Find existing record in cache
+          const existing = this.findRecordInCache(recordConfig.type, recordConfig.name);
+          
+          if (existing) {
+            // Check if update is needed
+            if (this.recordNeedsUpdate(existing, recordConfig)) {
+              pendingChanges.update.push({
+                id: existing.id,
+                record: recordConfig,
+                existing
+              });
+            } else {
+              pendingChanges.unchanged.push({
+                record: recordConfig,
+                existing
+              });
+              
+              // Update stats counter if available
+              if (global.statsCounter) {
+                global.statsCounter.upToDate++;
+              }
+            }
+          } else {
+            // Need to create a new record
+            pendingChanges.create.push({
+              record: recordConfig
+            });
+          }
+        } catch (error) {
+          logger.error(`Error processing ${recordConfig.name}: ${error.message}`);
+          
+          if (global.statsCounter) {
+            global.statsCounter.errors++;
+          }
+        }
+      }
+      
+      // Second pass: apply all changes
+      logger.debug(`DNS changes: ${pendingChanges.create.length} to create, ${pendingChanges.update.length} to update, ${pendingChanges.unchanged.length} unchanged`);
+      
+      // Create new records
+      for (const { record } of pendingChanges.create) {
+        try {
+          const result = await this.createRecord(record);
+          results.push(result);
+        } catch (error) {
+          logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
+          
+          if (global.statsCounter) {
+            global.statsCounter.errors++;
+          }
+        }
+      }
+      
+      // Update existing records
+      for (const { id, record } of pendingChanges.update) {
+        try {
+          const result = await this.updateRecord(id, record);
+          results.push(result);
+        } catch (error) {
+          logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
+          
+          if (global.statsCounter) {
+            global.statsCounter.errors++;
+          }
+        }
+      }
+      
+      // Add unchanged records to results too
+      for (const { existing } of pendingChanges.unchanged) {
+        results.push(existing);
+      }
+      
+      return results;
+    } catch (error) {
+      logger.error(`Failed to batch process DNS records: ${error.message}`);
+      throw error;
+    }
+  }
+  
+  /**
    * Ensure a DNS record exists and is up to date
+   * This is the legacy method for ensuring a single record
+   * For better performance, use batchEnsureRecords instead
    */
   async ensureRecord(record) {
     try {
@@ -174,18 +445,14 @@ class CloudflareAPI {
       // Validate the record
       this.validateRecord(record);
       
-      // Search for existing record
-      const existingRecords = await this.listRecords({
-        type: record.type,
-        name: record.name
-      });
+      // Check cache first
+      await this.getRecordsFromCache();
+      const existingFromCache = this.findRecordInCache(record.type, record.name);
       
-      if (existingRecords.length > 0) {
-        const existing = existingRecords[0];
-        
+      if (existingFromCache) {
         // Check if update is needed
-        if (this.recordNeedsUpdate(existing, record)) {
-          return await this.updateRecord(existing.id, record);
+        if (this.recordNeedsUpdate(existingFromCache, record)) {
+          return await this.updateRecord(existingFromCache.id, record);
         }
         
         logger.debug(`${record.type} record for ${record.name} already up to date`);
@@ -195,7 +462,7 @@ class CloudflareAPI {
           global.statsCounter.upToDate++;
         }
         
-        return existing;
+        return existingFromCache;
       } else {
         // Create new record
         return await this.createRecord(record);
