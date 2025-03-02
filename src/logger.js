@@ -173,4 +173,7 @@ class Logger {
 
 // Create and export singleton instance
 const logger = new Logger();
+
+// Export both the logger and LOG_LEVELS
 module.exports = logger;
+module.exports.LOG_LEVELS = LOG_LEVELS;

@@ -2,6 +2,7 @@
  * Utility functions for Traefik DNS Manager
  */
 const logger = require('./logger');
+const { LOG_LEVELS } = require('./logger');
 
 /**
  * Extract hostnames from a Traefik router rule
