@@ -163,31 +163,34 @@ class ConfigManager {
     return this.ipCache.ipv4;
   }
   
-  /**
-   * Update the public IP cache by calling external IP services
-   */
-  async updatePublicIPs() {
-    try {
-      // Use environment variables if provided, otherwise fetch from IP service
-      let ipv4 = process.env.PUBLIC_IP;
-      let ipv6 = process.env.PUBLIC_IPV6;
+    /**
+     * Update the public IP cache by calling external IP services
+     */
+    async updatePublicIPs() {
+      try {
+        // Use a flag to prevent duplicate logs of the same IP
+        const oldIpv4 = this.ipCache.ipv4;
+        
+        // Use environment variables if provided, otherwise fetch from IP service
+        let ipv4 = process.env.PUBLIC_IP;
+        let ipv6 = process.env.PUBLIC_IPV6;
       
-      // If IP not set via environment, fetch from service
-      if (!ipv4) {
-        try {
-          // First try ipify.org
-          const response = await axios.get('https://api.ipify.org', { timeout: 5000 });
-          ipv4 = response.data;
-        } catch (error) {
-          // Fallback to ifconfig.me if ipify fails
+        // If IP not set via environment, fetch from service
+        if (!ipv4) {
           try {
-            const response = await axios.get('https://ifconfig.me/ip', { timeout: 5000 });
+            // First try ipify.org
+            const response = await axios.get('https://api.ipify.org', { timeout: 5000 });
             ipv4 = response.data;
-          } catch (fallbackError) {
-            logger.error(`Failed to fetch public IPv4 address: ${fallbackError.message}`);
+          } catch (error) {
+            // Fallback to ifconfig.me if ipify fails
+            try {
+              const response = await axios.get('https://ifconfig.me/ip', { timeout: 5000 });
+              ipv4 = response.data;
+            } catch (fallbackError) {
+              logger.error(`Failed to fetch public IPv4 address: ${fallbackError.message}`);
+            }
           }
         }
-      }
       
       // Try to get IPv6 if not set in environment
       if (!ipv6) {
@@ -207,10 +210,11 @@ class ConfigManager {
         lastCheck: Date.now()
       };
       
-      if (ipv4) {
+      // Only log if the IP has changed
+      if (ipv4 && ipv4 !== oldIpv4) {
         logger.info(`Public IPv4: ${ipv4}`);
       }
-      if (ipv6) {
+      if (ipv6 && ipv6 !== this.ipCache.ipv6) {
         logger.debug(`Public IPv6: ${ipv6}`);
       }
       
