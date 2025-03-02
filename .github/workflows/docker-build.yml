@@ -27,9 +27,38 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for all tags and branches
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+      
+      - name: Generate version number
+        id: version
+        run: |
+          # Generate date-based version
+          DATE_TAG=$(date +'%Y%m%d')
+          
+          # Get commit count for additional uniqueness
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          
+          # Create a version like 20250302.45 (date.commit_count)
+          VERSION_TAG="${DATE_TAG}.${COMMIT_COUNT}"
+          echo "VERSION=${VERSION_TAG}" >> $GITHUB_OUTPUT
+          echo "DATE_TAG=${DATE_TAG}" >> $GITHUB_OUTPUT
+          
+          # For branches other than main/master, create branch-specific version
+          if [[ "${{ github.ref_name }}" != "main" && "${{ github.ref_name }}" != "master" ]]; then
+            BRANCH_VERSION="${VERSION_TAG}-${{ github.ref_name }}"
+            # Replace slashes with dashes for feature branches
+            BRANCH_VERSION="${BRANCH_VERSION//\//-}"
+            echo "BRANCH_VERSION=${BRANCH_VERSION}" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Generated version: ${VERSION_TAG}"
+          if [[ -n "${BRANCH_VERSION}" ]]; then
+            echo "Branch version: ${BRANCH_VERSION}"
+          fi
       
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
@@ -54,13 +83,17 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/traefik-dns-manager
             ghcr.io/${{ github.repository }}
           tags: |
+            # Latest tag for main/master
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
+            
+            # Date + commit count for all builds
+            type=raw,value=${{ steps.version.outputs.VERSION }}
+            
+            # Just date for all builds
+            type=raw,value=${{ steps.version.outputs.DATE_TAG }}
+            
+            # Branch-specific version for feature branches
+            type=raw,value=${{ steps.version.outputs.BRANCH_VERSION }},enable=${{ steps.version.outputs.BRANCH_VERSION != '' }}
       
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
