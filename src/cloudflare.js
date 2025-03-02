@@ -14,7 +14,9 @@ class CloudflareAPI {
     this.client = axios.create({
       baseURL: 'https://api.cloudflare.com/client/v4',
       headers: {
-        'Authorization': `Bearer ${this.token}`,
+        'Authorization': `Bearer ${this.token}
+
+module.exports = CloudflareAPI;`,
         'Content-Type': 'application/json'
       },
       timeout: 10000

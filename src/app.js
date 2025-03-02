@@ -20,7 +20,7 @@ const docker = new DockerAPI(config);
 // Global cache for container labels
 let containerLabelsCache = {};
 // Global counters for summary statistics
-let statsCounter = {
+global.statsCounter = {
   created: 0,
   updated: 0,
   upToDate: 0,
@@ -36,7 +36,7 @@ async function pollTraefikAPI() {
     logger.debug('Polling Traefik API for routers...');
     
     // Reset stats counter for this polling cycle
-    statsCounter = {
+    global.statsCounter = {
       created: 0,
       updated: 0,
       upToDate: 0,
@@ -74,7 +74,7 @@ async function pollTraefikAPI() {
         
         for (const hostname of hostnames) {
           try {
-            statsCounter.total++;
+            global.statsCounter.total++;
             
             // Find container labels for this router if possible
             const containerLabels = findLabelsForRouter(router);
@@ -101,7 +101,7 @@ async function pollTraefikAPI() {
             const result = await cloudflare.ensureRecord(recordConfig);
             logger.debug(`Processed hostname: ${fqdn} as ${recordConfig.type} record`);
           } catch (error) {
-            statsCounter.errors++;
+            global.statsCounter.errors++;
             logger.error(`Error processing hostname ${hostname}: ${error.message}`);
           }
         }
@@ -109,21 +109,21 @@ async function pollTraefikAPI() {
     }
     
     // Log summary stats if we have records
-    if (statsCounter.total > 0) {
-      if (statsCounter.created > 0) {
-        logger.success(`Created ${statsCounter.created} new DNS records`);
+    if (global.statsCounter.total > 0) {
+      if (global.statsCounter.created > 0) {
+        logger.success(`Created ${global.statsCounter.created} new DNS records`);
       }
       
-      if (statsCounter.updated > 0) {
-        logger.success(`Updated ${statsCounter.updated} existing DNS records`);
+      if (global.statsCounter.updated > 0) {
+        logger.success(`Updated ${global.statsCounter.updated} existing DNS records`);
       }
       
-      if (statsCounter.upToDate > 0) {
-        logger.info(`${statsCounter.upToDate} DNS records are up to date`);
+      if (global.statsCounter.upToDate > 0) {
+        logger.info(`${global.statsCounter.upToDate} DNS records are up to date`);
       }
       
-      if (statsCounter.errors > 0) {
-        logger.warn(`Encountered ${statsCounter.errors} errors processing DNS records`);
+      if (global.statsCounter.errors > 0) {
+        logger.warn(`Encountered ${global.statsCounter.errors} errors processing DNS records`);
       }
     }
     
