@@ -11,6 +11,8 @@ A service that automatically manages Cloudflare DNS records based on Traefik rou
 - 🎛️ Fine-grained control with service-specific labels
 - 💪 Fault-tolerant design with retry mechanisms
 - 🧹 Optional cleanup of orphaned DNS records
+- 📊 Optimized performance with DNS caching and batch processing
+- 🖨️ Configurable logging levels for better troubleshooting
 
 ## Quick Start
 
@@ -29,6 +31,7 @@ services:
       - CLOUDFLARE_TOKEN=your_cloudflare_api_token
       - CLOUDFLARE_ZONE=example.com
       - TRAEFIK_API_URL=http://traefik:8080/api
+      - LOG_LEVEL=INFO
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -165,6 +168,58 @@ services:
 | `WATCH_DOCKER_EVENTS` | Whether to watch Docker events | `true` | No |
 | `CLEANUP_ORPHANED` | Whether to remove orphaned DNS records | `false` | No |
 | `DOCKER_SOCKET` | Path to Docker socket | `/var/run/docker.sock` | No |
+| `LOG_LEVEL` | Logging verbosity (ERROR, WARN, INFO, DEBUG, TRACE) | `INFO` | No |
+| `DNS_CACHE_REFRESH_INTERVAL` | How often to refresh DNS cache (ms) | `3600000` (1 hour) | No |
+
+## Logging System
+
+The application includes a configurable logging system to help with monitoring and troubleshooting:
+
+### Log Levels
+
+- `ERROR` - Only critical errors that break functionality
+- `WARN` - Important warnings that don't break functionality
+- `INFO` - Key operational information (default)
+- `DEBUG` - Detailed information for troubleshooting
+- `TRACE` - Extremely detailed information for deep troubleshooting
+
+The default level is `INFO`, which provides a clean, readable output with important operational information. Set the `LOG_LEVEL` environment variable to change the logging verbosity.
+
+### INFO Level Format
+
+The INFO level uses special formatting with emojis for better readability:
+
+```
+✓ Starting Traefik DNS Manager
+ℹ️ Cloudflare Zone: example.com
+ℹ️ Processing 30 hostnames for DNS management
+✓ Created A record for example.com
+ℹ️ 29 DNS records are up to date
+✅ Traefik DNS Manager running successfully
+```
+
+## Performance Optimization
+
+The application includes built-in performance optimizations to reduce API calls and improve efficiency:
+
+### DNS Caching
+
+DNS records from Cloudflare are cached in memory to reduce API calls:
+
+- All records are fetched in a single API call
+- The cache is refreshed periodically (default: every hour)
+- The refresh interval can be adjusted with the `DNS_CACHE_REFRESH_INTERVAL` variable
+
+### Batch Processing
+
+DNS record updates are processed in batches:
+
+- All hostname configurations are collected first
+- Records are compared against the cache in memory
+- Only records that need changes receive API calls
+- All other records use cached data
+
+This significantly reduces API calls to Cloudflare, especially for deployments with many hostnames.
 
 ## Automatic Apex Domain Handling
 
