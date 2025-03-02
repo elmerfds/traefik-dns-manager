@@ -28,13 +28,34 @@ function extractHostnamesFromRule(rule) {
 }
 
 /**
+ * Check if a hostname is an apex/root domain
+ * @param {string} hostname - The hostname to check
+ * @param {string} zone - The zone name
+ * @returns {boolean} - True if the hostname is an apex domain
+ */
+function isApexDomain(hostname, zone) {
+  // Remove trailing dot if present
+  const cleanHostname = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
+  const cleanZone = zone.endsWith('.') ? zone.slice(0, -1) : zone;
+  
+  // If the hostname equals the zone, it's an apex domain
+  return cleanHostname === cleanZone;
+}
+
+/**
  * Extract DNS configuration from container labels
  */
 function extractDnsConfigFromLabels(labels, config, hostname) {
   const prefix = config.dnsLabelPrefix;
   
+  // Check if this is an apex domain
+  const isApex = isApexDomain(hostname, config.cloudflareZone);
+  
   // Determine record type - first from specific labels, then from default
-  const recordType = labels[`${prefix}type`] || config.defaultRecordType;
+  let recordType = labels[`${prefix}type`];
+  if (!recordType) {
+    recordType = isApex ? 'A' : config.defaultRecordType;
+  }
   
   // Get defaults for this record type
   const defaults = config.getDefaultsForType(recordType);
@@ -46,12 +67,36 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
     ttl: parseInt(labels[`${prefix}ttl`] || defaults.ttl, 10)
   };
   
-  // Handle content and proxied based on record type
-  if (['A', 'AAAA', 'CNAME', 'TXT', 'NS', 'MX', 'SRV', 'CAA'].includes(recordType)) {
-    recordConfig.content = labels[`${prefix}content`] || defaults.content;
+  // Handle content based on record type and apex status
+  let content = labels[`${prefix}content`];
+  
+  // If content isn't specified in labels
+  if (!content) {
+    if (isApex && recordType === 'CNAME') {
+      // For apex domains with CNAME type, force switch to A record with IP
+      recordConfig.type = 'A';
+      
+      // Get IP if available, otherwise set to fetch async
+      const ip = config.getPublicIPSync();
+      if (ip) {
+        recordConfig.content = ip;
+      } else {
+        // We're going to need to handle this case in ensureRecord
+        // Flag this record as needing async IP lookup
+        recordConfig.needsIpLookup = true;
+        recordConfig.content = ''; // Temporary placeholder
+      }
+      
+      console.log(`Automatically switched ${hostname} from CNAME to A record (apex domain)`);
+    } else {
+      recordConfig.content = defaults.content;
+    }
+  } else {
+    recordConfig.content = content;
   }
   
-  if (['A', 'AAAA', 'CNAME'].includes(recordType)) {
+  // Handle proxied status
+  if (['A', 'AAAA', 'CNAME'].includes(recordConfig.type)) {
     recordConfig.proxied = 
       labels[`${prefix}proxied`] !== undefined ? 
       labels[`${prefix}proxied`] !== 'false' : 
@@ -59,7 +104,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   }
   
   // Add type-specific fields
-  switch (recordType) {
+  switch (recordConfig.type) {
     case 'MX':
       recordConfig.priority = parseInt(
         labels[`${prefix}priority`] || defaults.priority, 
@@ -96,5 +141,6 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
 
 module.exports = {
   extractHostnamesFromRule,
-  extractDnsConfigFromLabels
+  extractDnsConfigFromLabels,
+  isApexDomain
 };

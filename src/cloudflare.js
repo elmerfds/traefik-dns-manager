@@ -142,10 +142,24 @@ class CloudflareAPI {
    * Ensure a DNS record exists and is up to date
    */
   async ensureRecord(record) {
-    // Validate the record
-    this.validateRecord(record);
-    
     try {
+      // Handle apex domains that need IP lookup
+      if (record.needsIpLookup && record.type === 'A') {
+        // Get public IP asynchronously
+        const ip = await this.config.getPublicIP();
+        if (ip) {
+          record.content = ip;
+          console.log(`Retrieved public IP for apex domain: ${ip}`);
+        } else {
+          throw new Error('Unable to determine public IP for apex domain A record');
+        }
+        // Remove the flag to avoid confusion
+        delete record.needsIpLookup;
+      }
+      
+      // Validate the record
+      this.validateRecord(record);
+      
       // Search for existing record
       const existingRecords = await this.listRecords({
         type: record.type,

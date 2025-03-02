@@ -35,32 +35,43 @@ services:
 
 ### Environment Variables
 
-#### Required Settings
-- `CLOUDFLARE_TOKEN`: Your Cloudflare API token with DNS edit permissions
-- `CLOUDFLARE_ZONE`: Your domain name (e.g., example.com)
+# Environment Variables
 
-#### Traefik API Settings
-- `TRAEFIK_API_URL`: URL to Traefik API (default: `http://traefik:8080/api`)
-- `TRAEFIK_API_USERNAME`: Username for Traefik API basic auth (optional)
-- `TRAEFIK_API_PASSWORD`: Password for Traefik API basic auth (optional)
+## Cloudflare Settings
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `CLOUDFLARE_TOKEN` | Cloudflare API token with DNS edit permissions | - | Yes |
+| `CLOUDFLARE_ZONE` | Your domain name (e.g., example.com) | - | Yes |
 
-#### DNS Default Settings
-- `DNS_DEFAULT_TYPE`: Default DNS record type (default: `CNAME`)
-- `DNS_DEFAULT_CONTENT`: Default record content (default: value of CLOUDFLARE_ZONE)
-- `DNS_DEFAULT_PROXIED`: Default proxy status (default: `true`)
-- `DNS_DEFAULT_TTL`: Default TTL in seconds (default: `1` for automatic)
+## Traefik API Settings
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `TRAEFIK_API_URL` | URL to Traefik API | `http://traefik:8080/api` | No |
+| `TRAEFIK_API_USERNAME` | Username for Traefik API basic auth | - | No |
+| `TRAEFIK_API_PASSWORD` | Password for Traefik API basic auth | - | No |
 
-#### Type-Specific Default Settings
-- `DNS_DEFAULT_[TYPE]_CONTENT`: Default content for specific record type
-- `DNS_DEFAULT_[TYPE]_PROXIED`: Default proxy status for specific record type
-- `DNS_DEFAULT_[TYPE]_TTL`: Default TTL for specific record type
-- `DNS_DEFAULT_MX_PRIORITY`: Default priority for MX records (default: `10`)
-- `DNS_DEFAULT_SRV_PORT`: Default port for SRV records
+## DNS Default Settings
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `DNS_DEFAULT_TYPE` | Default DNS record type | `CNAME` | No |
+| `DNS_DEFAULT_CONTENT` | Default record content | Value of `CLOUDFLARE_ZONE` | No |
+| `DNS_DEFAULT_PROXIED` | Default Cloudflare proxy status | `true` | No |
+| `DNS_DEFAULT_TTL` | Default TTL in seconds | `1` (automatic) | No |
 
-#### Application Behavior
-- `POLL_INTERVAL`: Interval in ms to poll Traefik API (default: `60000`)
-- `WATCH_DOCKER_EVENTS`: Whether to watch Docker events (default: `true`)
-- `CLEANUP_ORPHANED`: Whether to remove orphaned DNS records (default: `false`)
+## IP Address Settings
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `PUBLIC_IP` | Manual override for public IPv4 | Auto-detected | No |
+| `PUBLIC_IPV6` | Manual override for public IPv6 | Auto-detected | No |
+| `IP_REFRESH_INTERVAL` | How often to refresh IP (ms) | `3600000` (1 hour) | No |
+
+## Application Behavior
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `POLL_INTERVAL` | How often to poll Traefik API (ms) | `60000` (1 min) | No |
+| `WATCH_DOCKER_EVENTS` | Whether to watch Docker events | `true` | No |
+| `CLEANUP_ORPHANED` | Whether to remove orphaned DNS records | `false` | No |
+| `DOCKER_SOCKET` | Path to Docker socket | `/var/run/docker.sock` | No |
 
 ## Usage With Traefik
 

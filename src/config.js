@@ -1,6 +1,8 @@
 /**
  * Configuration management for Traefik DNS Manager
  */
+const axios = require('axios');
+
 class ConfigManager {
   constructor() {
     // Initialize IP cache first to avoid reference errors
@@ -89,6 +91,13 @@ class ConfigManager {
     this.pollInterval = parseInt(process.env.POLL_INTERVAL || '60000', 10);
     this.watchDockerEvents = process.env.WATCH_DOCKER_EVENTS !== 'false';
     this.cleanupOrphaned = process.env.CLEANUP_ORPHANED === 'true';
+    
+    // Schedule periodic IP refresh
+    this.ipRefreshInterval = parseInt(process.env.IP_REFRESH_INTERVAL || '3600000', 10);  // Default: 1 hour
+    if (this.ipRefreshInterval > 0) {
+      this.updatePublicIPs(); // Initial update
+      setInterval(() => this.updatePublicIPs(), this.ipRefreshInterval);
+    }
   }
   
   /**
@@ -104,8 +113,14 @@ class ConfigManager {
   
   /**
    * Get public IPv4 address synchronously (from cache)
+   * If cache is empty, will return null and trigger async update
    */
   getPublicIPSync() {
+    if (!this.ipCache.ipv4) {
+      // If we don't have a cached IP, trigger an async update
+      // This won't block the current execution, but will update for next time
+      this.updatePublicIPs();
+    }
     return this.ipCache?.ipv4 || null;
   }
   
@@ -113,21 +128,84 @@ class ConfigManager {
    * Get public IPv6 address synchronously (from cache)
    */
   getPublicIPv6Sync() {
+    if (!this.ipCache.ipv6) {
+      this.updatePublicIPs();
+    }
     return this.ipCache?.ipv6 || null;
   }
   
   /**
-   * Update the public IP cache
-   * This would typically be called periodically in a real implementation
+   * Get public IP address asynchronously
+   * Returns a promise that resolves to the public IP
+   */
+  async getPublicIP() {
+    // Check if cache is fresh (less than 1 hour old)
+    const cacheAge = Date.now() - this.ipCache.lastCheck;
+    if (this.ipCache.ipv4 && cacheAge < this.ipRefreshInterval) {
+      return this.ipCache.ipv4;
+    }
+    
+    // Cache is stale or empty, update it
+    await this.updatePublicIPs();
+    return this.ipCache.ipv4;
+  }
+  
+  /**
+   * Update the public IP cache by calling external IP services
    */
   async updatePublicIPs() {
-    // Implementation would call an IP service like ipify.org
-    // For this example, we just use environment variables
-    this.ipCache = {
-      ipv4: process.env.PUBLIC_IP || null,
-      ipv6: process.env.PUBLIC_IPV6 || null,
-      lastCheck: Date.now()
-    };
+    try {
+      // Use environment variables if provided, otherwise fetch from IP service
+      let ipv4 = process.env.PUBLIC_IP;
+      let ipv6 = process.env.PUBLIC_IPV6;
+      
+      // If IP not set via environment, fetch from service
+      if (!ipv4) {
+        try {
+          // First try ipify.org
+          const response = await axios.get('https://api.ipify.org', { timeout: 5000 });
+          ipv4 = response.data;
+        } catch (error) {
+          // Fallback to ifconfig.me if ipify fails
+          try {
+            const response = await axios.get('https://ifconfig.me/ip', { timeout: 5000 });
+            ipv4 = response.data;
+          } catch (fallbackError) {
+            console.error('Failed to fetch public IPv4 address:', fallbackError.message);
+          }
+        }
+      }
+      
+      // Try to get IPv6 if not set in environment
+      if (!ipv6) {
+        try {
+          const response = await axios.get('https://api6.ipify.org', { timeout: 5000 });
+          ipv6 = response.data;
+        } catch (error) {
+          // IPv6 fetch failure is not critical, just log it
+          console.debug('Failed to fetch public IPv6 address (this is normal if you don\'t have IPv6)');
+        }
+      }
+      
+      // Update cache
+      this.ipCache = {
+        ipv4: ipv4,
+        ipv6: ipv6,
+        lastCheck: Date.now()
+      };
+      
+      if (ipv4) {
+        console.log(`Updated public IPv4: ${ipv4}`);
+      }
+      if (ipv6) {
+        console.log(`Updated public IPv6: ${ipv6}`);
+      }
+      
+      return this.ipCache;
+    } catch (error) {
+      console.error('Error updating public IPs:', error.message);
+      return this.ipCache;
+    }
   }
 }
 

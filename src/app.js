@@ -49,6 +49,13 @@ async function pollTraefikAPI() {
             // Find container labels for this router if possible
             const containerLabels = findLabelsForRouter(router);
             
+            // Check if this service should skip DNS management
+            const skipDnsLabel = containerLabels[`${config.dnsLabelPrefix}skip`];
+            if (skipDnsLabel === 'true') {
+              console.log(`Skipping DNS management for ${hostname} due to dns.cloudflare.skip=true label`);
+              continue; // Skip to the next hostname
+            }
+            
             // Create fully qualified domain name
             const fqdn = ensureFqdn(hostname, config.cloudflareZone);
             processedHostnames.push(fqdn);
