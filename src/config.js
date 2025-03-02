@@ -92,6 +92,9 @@ class ConfigManager {
     this.pollInterval = parseInt(process.env.POLL_INTERVAL || '60000', 10);
     this.watchDockerEvents = process.env.WATCH_DOCKER_EVENTS !== 'false';
     this.cleanupOrphaned = process.env.CLEANUP_ORPHANED === 'true';
+
+    // Cache refresh interval in milliseconds (default: 1 hour)
+    this.cacheRefreshInterval = parseInt(process.env.DNS_CACHE_REFRESH_INTERVAL || '3600000', 10);    
     
     // Schedule immediate IP update and then periodic refresh
     this.ipRefreshInterval = parseInt(process.env.IP_REFRESH_INTERVAL || '3600000', 10);  // Default: 1 hour

@@ -327,15 +327,73 @@ async function watchDockerEvents() {
 }
 
 /**
+ * Display configured settings on startup in a visually appealing format
+ */
+function displaySettings(config) {
+  const version = '1.2.0'; // You may want to fetch this from package.json
+  
+  console.log(''); // Empty line for better readability
+  logger.info(`🚀 TRAEFIK DNS MANAGER v${version}`);
+  console.log(''); // Empty line for spacing
+  
+  // DNS Provider Section
+  logger.info('🌐 DNS PROVIDER');
+  logger.info(`  🟢 Cloudflare: Connected`);
+  // Mask the token for security
+  const maskedToken = config.cloudflareToken ? 'Configured' : 'Not configured';
+  logger.info(`  🔑 Auth: ${maskedToken}`);
+  logger.info(`  🌐 Zone: ${config.cloudflareZone}`);
+  console.log(''); // Empty line for spacing
+  
+  // Connectivity Section
+  logger.info('🔄 CONNECTIVITY');
+  logger.info(`  🟢 Traefik API: Connected at ${config.traefikApiUrl}`);
+  const authStatus = config.traefikApiUsername ? 'Enabled' : 'Disabled';
+  logger.info(`  🔐 Basic Auth: ${authStatus}`);
+  logger.info(`  🐳 Docker Socket: Accessible`);
+  console.log(''); // Empty line for spacing
+  
+  // Network Section
+  logger.info('📍 NETWORK');
+  const ipv4 = config.getPublicIPSync() || 'Auto-detecting...';
+  logger.info(`  🌐 IPv4: ${ipv4}`);
+  const ipv6 = config.getPublicIPv6Sync() || 'Not detected';
+  logger.info(`  🌐 IPv6: ${ipv6}`);
+  const ipRefreshMin = (config.ipRefreshInterval / 60000).toFixed(0);
+  logger.info(`  🔄 IP Refresh: Every ${ipRefreshMin} minutes`);
+  console.log(''); // Empty line for spacing
+  
+  // DNS Defaults Section
+  logger.info('⚓ DNS DEFAULTS');
+  logger.info(`  📄 Record Type: ${config.defaultRecordType}`);
+  logger.info(`  🔗 Content: ${config.defaultContent}`);
+  logger.info(`  🛡️ Proxied: ${config.defaultProxied ? 'Yes' : 'No'}`);
+  logger.info(`  ⏱️ TTL: ${config.defaultTTL} ${config.defaultTTL === 1 ? '(Auto)' : ''}`);
+  console.log(''); // Empty line for spacing
+  
+  // Settings Section
+  logger.info('⚙️ SETTINGS');
+  logger.info(`  📊 Log Level: ${logger.levelNames[logger.level]}`);
+  logger.info(`  🐳 Docker Events: ${config.watchDockerEvents ? 'Yes' : 'No'}`);
+  logger.info(`  🧹 Cleanup Orphaned: ${config.cleanupOrphaned ? 'Yes' : 'No'}`);
+  console.log(''); // Empty line for spacing
+  
+  // Performance Section
+  logger.info('⚡ PERFORMANCE');
+  const cacheRefreshMin = (config.cacheRefreshInterval / 60000).toFixed(0);
+  logger.info(`  💾 Cache TTL: ${cacheRefreshMin} minutes`);
+  const pollIntervalSec = (config.pollInterval / 1000).toFixed(0);
+  logger.info(`  🕒 Poll Interval: ${pollIntervalSec} seconds`);
+  console.log(''); // Empty line for spacing
+}
+
+/**
  * Application startup
  */
 async function start() {
   try {
-    logger.success('Starting Traefik DNS Manager');
-    logger.info(`Cloudflare Zone: ${config.cloudflareZone}`);
-    logger.debug(`Traefik API URL: ${config.traefikApiUrl}`);
-    logger.debug(`Default DNS type: ${config.defaultRecordType}`);
-    logger.debug(`Default DNS content: ${config.defaultContent}`);
+    // Display settings before any async operations
+    displaySettings(config);
     
     // Initialize APIs
     await cloudflare.init();
