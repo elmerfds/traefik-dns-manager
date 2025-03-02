@@ -1,6 +1,7 @@
 /**
  * Utility functions for Traefik DNS Manager
  */
+const logger = require('./logger');
 
 /**
  * Extract hostnames from a Traefik router rule
@@ -86,7 +87,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
         recordConfig.content = 'pending'; // Temporary placeholder
       }
       
-      console.log(`Apex domain detected for ${hostname}, using A record with IP: ${recordConfig.content || 'to be determined'}`);
+      logger.debug(`Apex domain detected for ${hostname}, using A record with IP: ${recordConfig.content || 'to be determined'}`);
     } else {
       recordConfig.content = defaults.content;
     }

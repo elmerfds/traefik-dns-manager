@@ -6,6 +6,7 @@ const CloudflareAPI = require('./cloudflare');
 const TraefikAPI = require('./traefik');
 const DockerAPI = require('./docker');
 const ConfigManager = require('./config');
+const logger = require('./logger');
 const { extractHostnamesFromRule, extractDnsConfigFromLabels } = require('./utils');
 
 // Initialize configuration
@@ -18,17 +19,34 @@ const docker = new DockerAPI(config);
 
 // Global cache for container labels
 let containerLabelsCache = {};
+// Global counters for summary statistics
+let statsCounter = {
+  created: 0,
+  updated: 0,
+  upToDate: 0,
+  errors: 0,
+  total: 0
+};
 
 /**
  * Main service that polls Traefik API and updates DNS records
  */
 async function pollTraefikAPI() {
   try {
-    console.log('Polling Traefik API for routers...');
+    logger.debug('Polling Traefik API for routers...');
+    
+    // Reset stats counter for this polling cycle
+    statsCounter = {
+      created: 0,
+      updated: 0,
+      upToDate: 0,
+      errors: 0,
+      total: 0
+    };
     
     // Get all routers from Traefik
     const routers = await traefik.getRouters();
-    console.log(`Found ${Object.keys(routers).length} routers in Traefik`);
+    logger.debug(`Found ${Object.keys(routers).length} routers in Traefik`);
     
     // Update container labels cache
     if (config.watchDockerEvents) {
@@ -38,6 +56,16 @@ async function pollTraefikAPI() {
     // Track processed hostnames for cleanup
     const processedHostnames = [];
     
+    // Count total hostnames to process
+    let totalHostnames = 0;
+    Object.values(routers).forEach(router => {
+      if (router.rule && router.rule.includes('Host')) {
+        totalHostnames += extractHostnamesFromRule(router.rule).length;
+      }
+    });
+    
+    logger.info(`Processing ${totalHostnames} hostnames for DNS management`);
+    
     // Process each router
     for (const [routerName, router] of Object.entries(routers)) {
       if (router.rule && router.rule.includes('Host')) {
@@ -46,13 +74,15 @@ async function pollTraefikAPI() {
         
         for (const hostname of hostnames) {
           try {
+            statsCounter.total++;
+            
             // Find container labels for this router if possible
             const containerLabels = findLabelsForRouter(router);
             
             // Check if this service should skip DNS management
             const skipDnsLabel = containerLabels[`${config.dnsLabelPrefix}skip`];
             if (skipDnsLabel === 'true') {
-              console.log(`Skipping DNS management for ${hostname} due to dns.cloudflare.skip=true label`);
+              logger.debug(`Skipping DNS management for ${hostname} due to dns.cloudflare.skip=true label`);
               continue; // Skip to the next hostname
             }
             
@@ -68,12 +98,32 @@ async function pollTraefikAPI() {
             );
             
             // Ensure DNS record exists
-            await cloudflare.ensureRecord(recordConfig);
-            console.log(`Processed hostname: ${fqdn} as ${recordConfig.type} record`);
+            const result = await cloudflare.ensureRecord(recordConfig);
+            logger.debug(`Processed hostname: ${fqdn} as ${recordConfig.type} record`);
           } catch (error) {
-            console.error(`Error processing hostname ${hostname}:`, error.message);
+            statsCounter.errors++;
+            logger.error(`Error processing hostname ${hostname}: ${error.message}`);
           }
         }
+      }
+    }
+    
+    // Log summary stats if we have records
+    if (statsCounter.total > 0) {
+      if (statsCounter.created > 0) {
+        logger.success(`Created ${statsCounter.created} new DNS records`);
+      }
+      
+      if (statsCounter.updated > 0) {
+        logger.success(`Updated ${statsCounter.updated} existing DNS records`);
+      }
+      
+      if (statsCounter.upToDate > 0) {
+        logger.info(`${statsCounter.upToDate} DNS records are up to date`);
+      }
+      
+      if (statsCounter.errors > 0) {
+        logger.warn(`Encountered ${statsCounter.errors} errors processing DNS records`);
       }
     }
     
@@ -83,7 +133,7 @@ async function pollTraefikAPI() {
     }
     
   } catch (error) {
-    console.error('Error polling Traefik API:', error);
+    logger.error(`Error polling Traefik API: ${error.message}`);
   }
   
   // Schedule next poll
@@ -111,9 +161,9 @@ async function updateContainerLabelsCache() {
     });
     
     containerLabelsCache = newCache;
-    console.log(`Updated container labels cache with ${containers.length} containers`);
+    logger.debug(`Updated container labels cache with ${containers.length} containers`);
   } catch (error) {
-    console.error('Error updating container labels cache:', error);
+    logger.error(`Error updating container labels cache: ${error.message}`);
   }
 }
 
@@ -159,7 +209,7 @@ function ensureFqdn(hostname, zone) {
  */
 async function cleanupOrphanedRecords(activeHostnames) {
   try {
-    console.log('Checking for orphaned DNS records...');
+    logger.debug('Checking for orphaned DNS records...');
     
     // Get all DNS records for our zone
     const allRecords = await cloudflare.listRecords();
@@ -177,17 +227,17 @@ async function cleanupOrphanedRecords(activeHostnames) {
     
     // Delete orphaned records
     for (const record of orphanedRecords) {
-      console.log(`Removing orphaned DNS record: ${record.name} (${record.type})`);
+      logger.debug(`Removing orphaned DNS record: ${record.name} (${record.type})`);
       await cloudflare.deleteRecord(record.id);
     }
     
     if (orphanedRecords.length > 0) {
-      console.log(`Removed ${orphanedRecords.length} orphaned DNS records`);
+      logger.success(`Removed ${orphanedRecords.length} orphaned DNS records`);
     } else {
-      console.log('No orphaned DNS records found');
+      logger.success('No orphaned DNS records found');
     }
   } catch (error) {
-    console.error('Error cleaning up orphaned records:', error);
+    logger.error(`Error cleaning up orphaned records: ${error.message}`);
   }
 }
 
@@ -196,7 +246,7 @@ async function cleanupOrphanedRecords(activeHostnames) {
  */
 async function watchDockerEvents() {
   try {
-    console.log('Starting Docker event monitoring...');
+    logger.debug('Starting Docker event monitoring...');
     
     const events = await docker.getEvents();
     
@@ -208,7 +258,7 @@ async function watchDockerEvents() {
           event.Type === 'container' && 
           ['start', 'stop', 'die', 'destroy'].includes(event.status)
         ) {
-          console.log(`Docker ${event.status} event detected for ${event.Actor.Attributes.name}`);
+          logger.debug(`Docker ${event.status} event detected for ${event.Actor.Attributes.name}`);
           
           // Wait a moment for Traefik to update its routers
           setTimeout(async () => {
@@ -217,19 +267,19 @@ async function watchDockerEvents() {
           }, 3000);
         }
       } catch (error) {
-        console.error('Error processing Docker event:', error);
+        logger.error(`Error processing Docker event: ${error.message}`);
       }
     });
     
     events.on('error', (error) => {
-      console.error('Docker event stream error:', error);
+      logger.error(`Docker event stream error: ${error.message}`);
       // Try to reconnect after a delay
       setTimeout(watchDockerEvents, 10000);
     });
     
-    console.log('Docker event monitoring started');
+    logger.debug('Docker event monitoring started');
   } catch (error) {
-    console.error('Error setting up Docker event monitoring:', error);
+    logger.error(`Error setting up Docker event monitoring: ${error.message}`);
     // Try to reconnect after a delay
     setTimeout(watchDockerEvents, 10000);
   }
@@ -240,25 +290,25 @@ async function watchDockerEvents() {
  */
 async function start() {
   try {
-    console.log('Starting Traefik DNS Manager...');
-    console.log(`Cloudflare Zone: ${config.cloudflareZone}`);
-    console.log(`Traefik API URL: ${config.traefikApiUrl}`);
-    console.log(`Default DNS type: ${config.defaultRecordType}`);
-    console.log(`Default DNS content: ${config.defaultContent}`);
+    logger.success('Starting Traefik DNS Manager');
+    logger.info(`Cloudflare Zone: ${config.cloudflareZone}`);
+    logger.debug(`Traefik API URL: ${config.traefikApiUrl}`);
+    logger.debug(`Default DNS type: ${config.defaultRecordType}`);
+    logger.debug(`Default DNS content: ${config.defaultContent}`);
     
     // Initialize APIs
     await cloudflare.init();
     
     // Ensure we have a public IP before proceeding
-    console.log('Detecting public IP address...');
+    logger.debug('Detecting public IP address...');
     await config.updatePublicIPs();
     
     // Verify that we have an IP for A records
     if (!config.getPublicIPSync()) {
-      console.warn('Warning: Could not detect public IP address. A records for apex domains will fail.');
-      console.warn('Consider setting PUBLIC_IP environment variable manually.');
+      logger.warn('Could not detect public IP address. A records for apex domains will fail.');
+      logger.warn('Consider setting PUBLIC_IP environment variable manually.');
     } else {
-      console.log(`Using public IP: ${config.getPublicIPSync()}`);
+      logger.debug(`Using public IP: ${config.getPublicIPSync()}`);
     }
     
     // Start event monitoring if enabled
@@ -270,9 +320,9 @@ async function start() {
     // Start initial polling
     await pollTraefikAPI();
     
-    console.log('Traefik DNS Manager started successfully');
+    logger.complete('Traefik DNS Manager running successfully');
   } catch (error) {
-    console.error('Failed to start Traefik DNS Manager:', error);
+    logger.error(`Failed to start Traefik DNS Manager: ${error.message}`);
     process.exit(1);
   }
 }

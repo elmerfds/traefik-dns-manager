@@ -2,6 +2,7 @@
  * Docker API client for monitoring container events
  */
 const Docker = require('dockerode');
+const logger = require('./logger');
 
 class DockerAPI {
   constructor(config) {
@@ -22,7 +23,7 @@ class DockerAPI {
         all: false // Only running containers
       });
     } catch (error) {
-      console.error('Failed to list containers:', error.message);
+      logger.error(`Failed to list containers: ${error.message}`);
       throw error;
     }
   }
@@ -36,7 +37,7 @@ class DockerAPI {
       const details = await container.inspect();
       return details;
     } catch (error) {
-      console.error(`Failed to get container ${id}:`, error.message);
+      logger.error(`Failed to get container ${id}: ${error.message}`);
       throw error;
     }
   }
@@ -50,7 +51,7 @@ class DockerAPI {
         filters
       });
     } catch (error) {
-      console.error('Failed to get Docker events:', error.message);
+      logger.error(`Failed to get Docker events: ${error.message}`);
       throw error;
     }
   }
@@ -63,7 +64,7 @@ class DockerAPI {
       const info = await this.docker.info();
       return true;
     } catch (error) {
-      console.error('Failed to connect to Docker:', error.message);
+      logger.error(`Failed to connect to Docker: ${error.message}`);
       return false;
     }
   }

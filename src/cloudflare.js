@@ -2,6 +2,7 @@
  * Cloudflare API client for DNS management
  */
 const axios = require('axios');
+const logger = require('./logger');
 
 class CloudflareAPI {
   constructor(config) {
@@ -18,6 +19,9 @@ class CloudflareAPI {
       },
       timeout: 10000
     });
+    
+    // Reference to the app's stats counter if available
+    this.statsCounter = global.statsCounter || null;
   }
   
   /**
@@ -35,11 +39,12 @@ class CloudflareAPI {
       }
       
       this.zoneId = response.data.result[0].id;
-      console.log(`Cloudflare zone ID for ${this.zone}: ${this.zoneId}`);
+      logger.debug(`Cloudflare zone ID for ${this.zone}: ${this.zoneId}`);
+      logger.success('Cloudflare zone authenticated successfully');
       
       return true;
     } catch (error) {
-      console.error('Failed to initialize Cloudflare API:', error.message);
+      logger.error(`Failed to initialize Cloudflare API: ${error.message}`);
       throw new Error(`Failed to initialize Cloudflare API: ${error.message}`);
     }
   }
@@ -59,7 +64,7 @@ class CloudflareAPI {
       
       return response.data.result;
     } catch (error) {
-      console.error('Failed to list DNS records:', error.message);
+      logger.error(`Failed to list DNS records: ${error.message}`);
       throw error;
     }
   }
@@ -84,10 +89,16 @@ class CloudflareAPI {
         recordWithComment
       );
       
-      console.log(`Created ${record.type} record for ${record.name}`);
+      logger.success(`Created ${record.type} record for ${record.name}`);
+      
+      // Update stats counter if available
+      if (global.statsCounter) {
+        global.statsCounter.created++;
+      }
+      
       return response.data.result;
     } catch (error) {
-      console.error(`Failed to create ${record.type} record for ${record.name}:`, error.message);
+      logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
       throw error;
     }
   }
@@ -112,10 +123,16 @@ class CloudflareAPI {
         recordWithComment
       );
       
-      console.log(`Updated ${record.type} record for ${record.name}`);
+      logger.success(`Updated ${record.type} record for ${record.name}`);
+      
+      // Update stats counter if available
+      if (global.statsCounter) {
+        global.statsCounter.updated++;
+      }
+      
       return response.data.result;
     } catch (error) {
-      console.error(`Failed to update ${record.type} record for ${record.name}:`, error.message);
+      logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
       throw error;
     }
   }
@@ -130,10 +147,10 @@ class CloudflareAPI {
       }
       
       await this.client.delete(`/zones/${this.zoneId}/dns_records/${id}`);
-      console.log(`Deleted DNS record with ID ${id}`);
+      logger.debug(`Deleted DNS record with ID ${id}`);
       return true;
     } catch (error) {
-      console.error(`Failed to delete DNS record with ID ${id}:`, error.message);
+      logger.error(`Failed to delete DNS record with ID ${id}: ${error.message}`);
       throw error;
     }
   }
@@ -149,7 +166,7 @@ class CloudflareAPI {
         const ip = await this.config.getPublicIP();
         if (ip) {
           record.content = ip;
-          console.log(`Retrieved public IP for apex domain ${record.name}: ${ip}`);
+          logger.debug(`Retrieved public IP for apex domain ${record.name}: ${ip}`);
         } else {
           throw new Error(`Unable to determine public IP for apex domain A record: ${record.name}`);
         }
@@ -174,14 +191,20 @@ class CloudflareAPI {
           return await this.updateRecord(existing.id, record);
         }
         
-        console.log(`${record.type} record for ${record.name} already up to date`);
+        logger.debug(`${record.type} record for ${record.name} already up to date`);
+        
+        // Update stats counter if available
+        if (global.statsCounter) {
+          global.statsCounter.upToDate++;
+        }
+        
         return existing;
       } else {
         // Create new record
         return await this.createRecord(record);
       }
     } catch (error) {
-      console.error(`Failed to ensure record for ${record.name}:`, error.message);
+      logger.error(`Failed to ensure record for ${record.name}: ${error.message}`);
       throw error;
     }
   }
@@ -292,15 +315,13 @@ class CloudflareAPI {
         break;
         
       default:
-        console.warn(`Warning: Record type ${record.type} may not be fully supported`);
+        logger.warn(`Record type ${record.type} may not be fully supported`);
     }
     
     // Proxied is only valid for certain record types
     if (record.proxied && !['A', 'AAAA', 'CNAME'].includes(record.type)) {
-      console.warn(`Warning: 'proxied' is not valid for ${record.type} records. Setting to false.`);
+      logger.warn(`'proxied' is not valid for ${record.type} records. Setting to false.`);
       record.proxied = false;
     }
   }
 }
-
-module.exports = CloudflareAPI;

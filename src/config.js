@@ -2,6 +2,7 @@
  * Configuration management for Traefik DNS Manager
  */
 const axios = require('axios');
+const logger = require('./logger');
 
 class ConfigManager {
   constructor() {
@@ -100,7 +101,7 @@ class ConfigManager {
       // Update A record defaults after IP discovery
       this.recordDefaults.A.content = process.env.DNS_DEFAULT_A_CONTENT || this.ipCache.ipv4 || '';
       this.recordDefaults.AAAA.content = process.env.DNS_DEFAULT_AAAA_CONTENT || this.ipCache.ipv6 || '';
-      console.log(`Updated A record defaults with IP: ${this.recordDefaults.A.content}`);
+      logger.debug(`Updated A record defaults with IP: ${this.recordDefaults.A.content}`);
     });
 
     // Set up periodic IP refresh
@@ -180,7 +181,7 @@ class ConfigManager {
             const response = await axios.get('https://ifconfig.me/ip', { timeout: 5000 });
             ipv4 = response.data;
           } catch (fallbackError) {
-            console.error('Failed to fetch public IPv4 address:', fallbackError.message);
+            logger.error(`Failed to fetch public IPv4 address: ${fallbackError.message}`);
           }
         }
       }
@@ -192,7 +193,7 @@ class ConfigManager {
           ipv6 = response.data;
         } catch (error) {
           // IPv6 fetch failure is not critical, just log it
-          console.debug('Failed to fetch public IPv6 address (this is normal if you don\'t have IPv6)');
+          logger.debug('Failed to fetch public IPv6 address (this is normal if you don\'t have IPv6)');
         }
       }
       
@@ -204,15 +205,15 @@ class ConfigManager {
       };
       
       if (ipv4) {
-        console.log(`Updated public IPv4: ${ipv4}`);
+        logger.info(`Public IPv4: ${ipv4}`);
       }
       if (ipv6) {
-        console.log(`Updated public IPv6: ${ipv6}`);
+        logger.debug(`Public IPv6: ${ipv6}`);
       }
       
       return this.ipCache;
     } catch (error) {
-      console.error('Error updating public IPs:', error.message);
+      logger.error(`Error updating public IPs: ${error.message}`);
       return this.ipCache;
     }
   }

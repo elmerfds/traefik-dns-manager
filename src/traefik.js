@@ -2,6 +2,7 @@
  * Traefik API client for retrieving router configurations
  */
 const axios = require('axios');
+const logger = require('./logger');
 
 class TraefikAPI {
   constructor(config) {
@@ -29,19 +30,21 @@ class TraefikAPI {
   async getRouters() {
     try {
       const response = await this.client.get('/http/routers');
+      logger.debug(`Retrieved ${Object.keys(response.data).length} routers from Traefik API`);
       return response.data;
     } catch (error) {
-      console.error('Failed to get Traefik routers:', error.message);
-      
       // Check for specific error types for better error messages
       if (error.code === 'ECONNREFUSED') {
+        logger.error(`Connection refused to Traefik API at ${this.apiUrl}. Is Traefik running?`);
         throw new Error(`Connection refused to Traefik API at ${this.apiUrl}. Is Traefik running?`);
       }
       
       if (error.response && error.response.status === 401) {
+        logger.error('Authentication failed for Traefik API. Check your username and password.');
         throw new Error('Authentication failed for Traefik API. Check your username and password.');
       }
       
+      logger.error(`Failed to get Traefik routers: ${error.message}`);
       throw error;
     }
   }
@@ -52,9 +55,10 @@ class TraefikAPI {
   async getServices() {
     try {
       const response = await this.client.get('/http/services');
+      logger.debug(`Retrieved ${Object.keys(response.data).length} services from Traefik API`);
       return response.data;
     } catch (error) {
-      console.error('Failed to get Traefik services:', error.message);
+      logger.error(`Failed to get Traefik services: ${error.message}`);
       throw error;
     }
   }
@@ -66,9 +70,10 @@ class TraefikAPI {
     try {
       // Try to access the overview endpoint
       await this.client.get('/overview');
+      logger.success('Successfully connected to Traefik API');
       return true;
     } catch (error) {
-      console.error('Failed to connect to Traefik API:', error.message);
+      logger.error(`Failed to connect to Traefik API: ${error.message}`);
       return false;
     }
   }
