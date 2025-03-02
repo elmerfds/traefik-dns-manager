@@ -1,19 +1,26 @@
-FROM node:20-alpine
-
-# Create app directory
+# Stage 1: Generate package-lock.json
+FROM node:20-alpine AS dependencies
 WORKDIR /app
+COPY package.json .
+RUN npm install --package-lock-only
+RUN npm install --omit=dev
 
-# Copy package files first to leverage Docker cache
-COPY package*.json ./
-
-# If package-lock.json exists, use ci, otherwise use install
-RUN test -f package-lock.json && npm ci --omit=dev || npm install --omit=dev
-
-# Bundle app source
+# Stage 2: Build the application
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY --from=dependencies /app/package*.json ./
+COPY --from=dependencies /app/node_modules ./node_modules
 COPY src ./src
+
+# Stage 3: Create the production image
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=build /app/package*.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/src ./src
 
 # Run as non-root user
 USER node
 
 # Start the app
-CMD [ "node", "src/app.js" ]
+CMD ["node", "src/app.js"]

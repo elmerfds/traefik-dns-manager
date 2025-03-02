@@ -1,17 +1,17 @@
 name: Build and Publish Docker Image
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Added manual trigger
   push:
     branches: [ main, master ]
     tags: [ 'v*' ]
-    paths-ignore:
+    paths-ignore:    # Added paths to ignore
       - 'README.md'
       - '**.md'
       - '.github/workflows/**'
   pull_request:
     branches: [ main, master ]
-    paths-ignore:
+    paths-ignore:    # Added paths to ignore
       - 'README.md'
       - '**.md'
       - '.github/workflows/**'
@@ -67,19 +67,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          
-      - name: Check image size
-        if: github.event_name != 'pull_request'
-        run: |
-          docker pull ${{ secrets.DOCKER_USERNAME }}/traefik-dns-manager:${{ github.sha }}
-          docker image ls ${{ secrets.DOCKER_USERNAME }}/traefik-dns-manager:${{ github.sha }}
-      
-      - name: Update Docker Hub Description
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: peter-evans/dockerhub-description@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-          repository: ${{ secrets.DOCKER_USERNAME }}/traefik-dns-manager
-          short-description: "Automatically manage Cloudflare DNS records based on Traefik routing configuration"
-          readme-filepath: ./README.md
