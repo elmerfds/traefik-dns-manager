@@ -249,6 +249,18 @@ async function start() {
     // Initialize APIs
     await cloudflare.init();
     
+    // Ensure we have a public IP before proceeding
+    console.log('Detecting public IP address...');
+    await config.updatePublicIPs();
+    
+    // Verify that we have an IP for A records
+    if (!config.getPublicIPSync()) {
+      console.warn('Warning: Could not detect public IP address. A records for apex domains will fail.');
+      console.warn('Consider setting PUBLIC_IP environment variable manually.');
+    } else {
+      console.log(`Using public IP: ${config.getPublicIPSync()}`);
+    }
+    
     // Start event monitoring if enabled
     if (config.watchDockerEvents) {
       await updateContainerLabelsCache();
@@ -264,17 +276,6 @@ async function start() {
     process.exit(1);
   }
 }
-
-// Handle graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('Received SIGTERM, shutting down...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('Received SIGINT, shutting down...');
-  process.exit(0);
-});
 
 // Start the application
 start();
