@@ -39,17 +39,17 @@ class ConfigManager {
     this.defaultProxied = process.env.DNS_DEFAULT_PROXIED !== 'false';
     this.defaultTTL = parseInt(process.env.DNS_DEFAULT_TTL || '1', 10);
     
-    // Record type specific defaults
+    // Record type specific defaults - we'll set A content after IP discovery
     this.recordDefaults = {
       A: {
-        content: process.env.DNS_DEFAULT_A_CONTENT || this.getPublicIPSync() || '',
+        content: '',  // Will be set after IP discovery
         proxied: process.env.DNS_DEFAULT_A_PROXIED !== undefined ? 
                  process.env.DNS_DEFAULT_A_PROXIED !== 'false' : 
                  this.defaultProxied,
         ttl: parseInt(process.env.DNS_DEFAULT_A_TTL || this.defaultTTL, 10)
       },
       AAAA: {
-        content: process.env.DNS_DEFAULT_AAAA_CONTENT || this.getPublicIPv6Sync() || '',
+        content: '',  // Will be set after IP discovery
         proxied: process.env.DNS_DEFAULT_AAAA_PROXIED !== undefined ? 
                  process.env.DNS_DEFAULT_AAAA_PROXIED !== 'false' : 
                  this.defaultProxied,
@@ -92,10 +92,19 @@ class ConfigManager {
     this.watchDockerEvents = process.env.WATCH_DOCKER_EVENTS !== 'false';
     this.cleanupOrphaned = process.env.CLEANUP_ORPHANED === 'true';
     
-    // Schedule periodic IP refresh
+    // Schedule immediate IP update and then periodic refresh
     this.ipRefreshInterval = parseInt(process.env.IP_REFRESH_INTERVAL || '3600000', 10);  // Default: 1 hour
+
+    // This update will happen asynchronously - the A record defaults will be updated
+    this.updatePublicIPs().then(() => {
+      // Update A record defaults after IP discovery
+      this.recordDefaults.A.content = process.env.DNS_DEFAULT_A_CONTENT || this.ipCache.ipv4 || '';
+      this.recordDefaults.AAAA.content = process.env.DNS_DEFAULT_AAAA_CONTENT || this.ipCache.ipv6 || '';
+      console.log(`Updated A record defaults with IP: ${this.recordDefaults.A.content}`);
+    });
+
+    // Set up periodic IP refresh
     if (this.ipRefreshInterval > 0) {
-      this.updatePublicIPs(); // Initial update
       setInterval(() => this.updatePublicIPs(), this.ipRefreshInterval);
     }
   }

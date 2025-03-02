@@ -144,14 +144,14 @@ class CloudflareAPI {
   async ensureRecord(record) {
     try {
       // Handle apex domains that need IP lookup
-      if (record.needsIpLookup && record.type === 'A') {
+      if ((record.needsIpLookup || record.content === 'pending') && record.type === 'A') {
         // Get public IP asynchronously
         const ip = await this.config.getPublicIP();
         if (ip) {
           record.content = ip;
-          console.log(`Retrieved public IP for apex domain: ${ip}`);
+          console.log(`Retrieved public IP for apex domain ${record.name}: ${ip}`);
         } else {
-          throw new Error('Unable to determine public IP for apex domain A record');
+          throw new Error(`Unable to determine public IP for apex domain A record: ${record.name}`);
         }
         // Remove the flag to avoid confusion
         delete record.needsIpLookup;

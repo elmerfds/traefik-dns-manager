@@ -72,22 +72,21 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   
   // If content isn't specified in labels
   if (!content) {
-    if (isApex && recordType === 'CNAME') {
-      // For apex domains with CNAME type, force switch to A record with IP
+    if (isApex && (recordType === 'CNAME' || recordType === 'A')) {
+      // For apex domains, we should use an A record
       recordConfig.type = 'A';
       
-      // Get IP if available, otherwise set to fetch async
+      // Get IP if available, otherwise set flag for async IP lookup
       const ip = config.getPublicIPSync();
       if (ip) {
         recordConfig.content = ip;
       } else {
-        // We're going to need to handle this case in ensureRecord
         // Flag this record as needing async IP lookup
         recordConfig.needsIpLookup = true;
-        recordConfig.content = ''; // Temporary placeholder
+        recordConfig.content = 'pending'; // Temporary placeholder
       }
       
-      console.log(`Automatically switched ${hostname} from CNAME to A record (apex domain)`);
+      console.log(`Apex domain detected for ${hostname}, using A record with IP: ${recordConfig.content || 'to be determined'}`);
     } else {
       recordConfig.content = defaults.content;
     }
