@@ -20,6 +20,9 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write  # This is required to push to GitHub Container Registry    
     
     steps:
       - name: Checkout code
