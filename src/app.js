@@ -19,6 +19,7 @@ const docker = new DockerAPI(config);
 
 // Global cache for container labels
 let containerLabelsCache = {};
+
 // Global counters for summary statistics
 global.statsCounter = {
   created: 0,
@@ -28,10 +29,24 @@ global.statsCounter = {
   total: 0
 };
 
+// Lock to prevent parallel polling
+let isPolling = false;
+// Track last docker event time to prevent duplicate polling
+let lastDockerEventTime = 0;
+
 /**
  * Main service that polls Traefik API and updates DNS records
  */
 async function pollTraefikAPI() {
+  // Skip if already polling to prevent parallel execution
+  if (isPolling) {
+    logger.debug('Skipping poll - another poll cycle is already in progress');
+    return;
+  }
+  
+  // Set polling lock
+  isPolling = true;
+  
   try {
     logger.debug('Polling Traefik API for routers...');
     
@@ -134,9 +149,12 @@ async function pollTraefikAPI() {
     
   } catch (error) {
     logger.error(`Error polling Traefik API: ${error.message}`);
+  } finally {
+    // Always release the polling lock
+    isPolling = false;
   }
   
-  // Schedule next poll
+  // Schedule next poll only if this is a regular poll (not triggered by Docker event)
   setTimeout(pollTraefikAPI, config.pollInterval);
 }
 
@@ -260,10 +278,24 @@ async function watchDockerEvents() {
         ) {
           logger.debug(`Docker ${event.status} event detected for ${event.Actor.Attributes.name}`);
           
+          // Prevent too frequent updates by checking time since last event
+          const now = Date.now();
+          if (now - lastDockerEventTime < 3000) {
+            logger.debug('Skipping Docker event polling (rate limiting)');
+            return;
+          }
+          
+          lastDockerEventTime = now;
+          
           // Wait a moment for Traefik to update its routers
           setTimeout(async () => {
-            await updateContainerLabelsCache();
-            await pollTraefikAPI();
+            // Only trigger polling if not already polling
+            if (!isPolling) {
+              await updateContainerLabelsCache();
+              await pollTraefikAPI();
+            } else {
+              logger.debug('Skipping Docker event polling (already polling)');
+            }
           }, 3000);
         }
       } catch (error) {
