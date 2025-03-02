@@ -14,16 +14,11 @@ class CloudflareAPI {
     this.client = axios.create({
       baseURL: 'https://api.cloudflare.com/client/v4',
       headers: {
-        'Authorization': `Bearer ${this.token}
-
-module.exports = CloudflareAPI;`,
+        'Authorization': `Bearer ${this.token}`,
         'Content-Type': 'application/json'
       },
       timeout: 10000
     });
-    
-    // Reference to the app's stats counter if available
-    this.statsCounter = global.statsCounter || null;
   }
   
   /**
@@ -327,3 +322,5 @@ module.exports = CloudflareAPI;`,
     }
   }
 }
+
+module.exports = CloudflareAPI;
