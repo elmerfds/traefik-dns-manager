@@ -1,8 +1,8 @@
 /**
  * Main application entry point for Traefik DNS Manager
- * Connects to Traefik API and manages Cloudflare DNS records
+ * Connects to Traefik API and manages DNS records
  */
-const CloudflareAPI = require('./cloudflare');
+const { DNSProviderFactory } = require('./providers');
 const TraefikAPI = require('./traefik');
 const DockerAPI = require('./docker');
 const ConfigManager = require('./config');
@@ -13,7 +13,7 @@ const { extractHostnamesFromRule, extractDnsConfigFromLabels } = require('./util
 const config = new ConfigManager();
 
 // Initialize API clients
-const cloudflare = new CloudflareAPI(config);
+const dnsProvider = DNSProviderFactory.createProvider(config);
 const traefik = new TraefikAPI(config);
 const docker = new DockerAPI(config);
 
@@ -105,7 +105,7 @@ async function pollTraefikAPI() {
             }
             
             // Create fully qualified domain name
-            const fqdn = ensureFqdn(hostname, config.cloudflareZone);
+            const fqdn = ensureFqdn(hostname, config.getProviderDomain());
             processedHostnames.push(fqdn);
             
             // Extract DNS configuration
@@ -129,7 +129,7 @@ async function pollTraefikAPI() {
     // Batch process all DNS records
     if (dnsRecordConfigs.length > 0) {
       logger.debug(`Batch processing ${dnsRecordConfigs.length} DNS record configurations`);
-      await cloudflare.batchEnsureRecords(dnsRecordConfigs);
+      await dnsProvider.batchEnsureRecords(dnsRecordConfigs);
     }
     
     // Log summary stats if we have records
@@ -239,7 +239,7 @@ async function cleanupOrphanedRecords(activeHostnames) {
     logger.debug('Checking for orphaned DNS records...');
     
     // Get all DNS records for our zone (from cache when possible)
-    const allRecords = await cloudflare.getRecordsFromCache();
+    const allRecords = await dnsProvider.getRecordsFromCache();
     
     // Find records that were created by this tool but no longer exist in Traefik
     const orphanedRecords = allRecords.filter(record => {
@@ -255,7 +255,7 @@ async function cleanupOrphanedRecords(activeHostnames) {
     // Delete orphaned records
     for (const record of orphanedRecords) {
       logger.debug(`Removing orphaned DNS record: ${record.name} (${record.type})`);
-      await cloudflare.deleteRecord(record.id);
+      await dnsProvider.deleteRecord(record.id);
     }
     
     if (orphanedRecords.length > 0) {
@@ -338,11 +338,11 @@ function displaySettings(config) {
   
   // DNS Provider Section
   logger.info('🌐 DNS PROVIDER');
-  logger.info(`  🟢 Cloudflare: Connected`);
-  // Mask the token for security
+  logger.info(`  🟢 Provider: ${config.dnsProvider}`);
+  // Mask any sensitive tokens for security
   const maskedToken = config.cloudflareToken ? 'Configured' : 'Not configured';
   logger.info(`  🔑 Auth: ${maskedToken}`);
-  logger.info(`  🌐 Zone: ${config.cloudflareZone}`);
+  logger.info(`  🌐 Zone: ${config.getProviderDomain()}`);
   console.log(''); // Empty line for spacing
   
   // Connectivity Section
@@ -395,8 +395,8 @@ async function start() {
     // Display settings before any async operations
     displaySettings(config);
     
-    // Initialize APIs
-    await cloudflare.init();
+    // Initialize DNS provider
+    await dnsProvider.init();
     
     // Ensure we have a public IP before proceeding
     logger.debug('Detecting public IP address...');

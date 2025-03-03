@@ -16,17 +16,25 @@ class ConfigManager {
       lastCheck: 0
     };
     
-    // Required Cloudflare settings
+    // DNS Provider configuration
+    this.dnsProvider = process.env.DNS_PROVIDER || 'cloudflare';
+    
+    // Provider-specific settings
+    // Cloudflare settings
     this.cloudflareToken = process.env.CLOUDFLARE_TOKEN;
     this.cloudflareZone = process.env.CLOUDFLARE_ZONE;
     
-    if (!this.cloudflareToken) {
-      throw new Error('CLOUDFLARE_TOKEN environment variable is required');
-    }
+    // Route53 settings (for future implementation)
+    this.route53AccessKey = process.env.ROUTE53_ACCESS_KEY;
+    this.route53SecretKey = process.env.ROUTE53_SECRET_KEY;
+    this.route53Zone = process.env.ROUTE53_ZONE;
     
-    if (!this.cloudflareZone) {
-      throw new Error('CLOUDFLARE_ZONE environment variable is required');
-    }
+    // Digital Ocean settings (for future implementation)
+    this.digitalOceanToken = process.env.DO_TOKEN;
+    this.digitalOceanDomain = process.env.DO_DOMAIN;
+    
+    // Validate required settings based on provider
+    this.validateProviderConfig();
     
     // Traefik API settings
     this.traefikApiUrl = process.env.TRAEFIK_API_URL || 'http://traefik:8080/api';
@@ -39,7 +47,7 @@ class ConfigManager {
     
     // Global DNS defaults
     this.defaultRecordType = process.env.DNS_DEFAULT_TYPE || 'CNAME';
-    this.defaultContent = process.env.DNS_DEFAULT_CONTENT || this.cloudflareZone;
+    this.defaultContent = process.env.DNS_DEFAULT_CONTENT || this.getProviderDomain();
     this.defaultProxied = process.env.DNS_DEFAULT_PROXIED !== 'false';
     this.defaultTTL = parseInt(process.env.DNS_DEFAULT_TTL || '1', 10);
     
@@ -99,6 +107,9 @@ class ConfigManager {
     // Cache refresh interval in milliseconds (default: 1 hour)
     this.cacheRefreshInterval = parseInt(process.env.DNS_CACHE_REFRESH_INTERVAL || '3600000', 10);
     
+    // IP refresh interval in milliseconds (default: 1 hour)
+    this.ipRefreshInterval = parseInt(process.env.IP_REFRESH_INTERVAL || '3600000', 10);
+    
     // Schedule immediate IP update and then periodic refresh
     this.updatePublicIPs().then(() => {
       // Update A record defaults after IP discovery
@@ -110,6 +121,62 @@ class ConfigManager {
     // Set up periodic IP refresh
     if (this.ipRefreshInterval > 0) {
       setInterval(() => this.updatePublicIPs(), this.ipRefreshInterval);
+    }
+  }
+  
+  /**
+   * Validate that required config is present for the selected provider
+   */
+  validateProviderConfig() {
+    switch (this.dnsProvider.toLowerCase()) {
+      case 'cloudflare':
+        if (!this.cloudflareToken) {
+          throw new Error('CLOUDFLARE_TOKEN environment variable is required for Cloudflare provider');
+        }
+        if (!this.cloudflareZone) {
+          throw new Error('CLOUDFLARE_ZONE environment variable is required for Cloudflare provider');
+        }
+        break;
+        
+      case 'route53':
+        if (!this.route53AccessKey) {
+          throw new Error('ROUTE53_ACCESS_KEY environment variable is required for Route53 provider');
+        }
+        if (!this.route53SecretKey) {
+          throw new Error('ROUTE53_SECRET_KEY environment variable is required for Route53 provider');
+        }
+        if (!this.route53Zone) {
+          throw new Error('ROUTE53_ZONE environment variable is required for Route53 provider');
+        }
+        break;
+        
+      case 'digitalocean':
+        if (!this.digitalOceanToken) {
+          throw new Error('DO_TOKEN environment variable is required for DigitalOcean provider');
+        }
+        if (!this.digitalOceanDomain) {
+          throw new Error('DO_DOMAIN environment variable is required for DigitalOcean provider');
+        }
+        break;
+        
+      default:
+        throw new Error(`Unsupported DNS provider: ${this.dnsProvider}`);
+    }
+  }
+  
+  /**
+   * Get the main domain for the current provider
+   */
+  getProviderDomain() {
+    switch (this.dnsProvider.toLowerCase()) {
+      case 'cloudflare':
+        return this.cloudflareZone;
+      case 'route53':
+        return this.route53Zone;
+      case 'digitalocean':
+        return this.digitalOceanDomain;
+      default:
+        return '';
     }
   }
   
