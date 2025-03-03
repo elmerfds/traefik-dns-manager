@@ -23,7 +23,7 @@ version: '3'
 
 services:
   traefik-dns-manager:
-    image: yourusername/traefik-dns-manager:latest
+    image: eafxx/traefik-dns-manager:latest
     container_name: traefik-dns-manager
     restart: unless-stopped
     user: "0:0"  # Required for Docker socket access
