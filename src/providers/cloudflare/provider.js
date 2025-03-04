@@ -558,6 +558,16 @@ recordNeedsUpdate(existing, newRecord) {
     if (['A', 'AAAA', 'CNAME'].includes(newRecord.type)) {
       const proxiedDiff = existing.proxied !== newRecord.proxied;
       logger.trace(`CloudflareProvider.recordNeedsUpdate: Proxied status - existing: ${existing.proxied}, new: ${newRecord.proxied}, different: ${proxiedDiff}`);
+      
+      if (proxiedDiff) {
+        // Log at INFO level to make proxied status changes more visible
+        if (newRecord.proxied === false) {
+          logger.info(`🔓 Disabling Cloudflare proxy for ${newRecord.name} (changing from proxied to unproxied)`);
+        } else {
+          logger.info(`🔒 Enabling Cloudflare proxy for ${newRecord.name} (changing from unproxied to proxied)`);
+        }
+      }
+      
       needsUpdate = needsUpdate || proxiedDiff;
     }
     
