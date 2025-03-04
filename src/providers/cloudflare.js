@@ -668,3 +668,5 @@ class CloudflareProvider extends DNSProvider {
     logger.trace(`CloudflareProvider.validateRecord: Record validation successful`);
   }
 }
+
+module.exports = CloudflareProvider;

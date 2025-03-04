@@ -19,7 +19,29 @@ class DNSProviderFactory {
       logger.debug(`Creating DNS provider: ${providerType}`);
       
       // Try to load the provider module
-      const ProviderClass = require(`./${providerType}`);
+      let ProviderClass;
+      
+      // Use explicit require for known providers to avoid path issues
+      if (providerType === 'cloudflare') {
+        ProviderClass = require('./cloudflare');
+      } else {
+        // For other providers, try to load dynamically
+        const providerPath = path.join(__dirname, `${providerType}.js`);
+        if (!fs.existsSync(providerPath)) {
+          throw new Error(`Provider module not found: ${providerPath}`);
+        }
+        ProviderClass = require(`./${providerType}`);
+      }
+      
+      // Check if the provider exports a class (function constructor)
+      if (typeof ProviderClass !== 'function') {
+        // If it's an object with a default export (ES modules), use that
+        if (ProviderClass.default && typeof ProviderClass.default === 'function') {
+          ProviderClass = ProviderClass.default;
+        } else {
+          throw new Error(`Provider module does not export a class constructor: ${providerType}`);
+        }
+      }
       
       // Create and return an instance
       return new ProviderClass(config);
