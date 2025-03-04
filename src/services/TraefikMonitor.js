@@ -36,6 +36,12 @@ class TraefikMonitor {
     
     // Poll timer reference
     this.pollTimer = null;
+    
+    // Cache for the last seen container labels from Docker service
+    this.lastDockerLabels = {};
+    
+    // Subscribe to Docker label updates
+    this.setupEventSubscriptions();
   }
   
   /**
@@ -58,6 +64,20 @@ class TraefikMonitor {
       logger.error(`Failed to initialize Traefik Monitor: ${error.message}`);
       throw error;
     }
+  }
+  
+  /**
+   * Set up event subscriptions
+   */
+  setupEventSubscriptions() {
+    // Subscribe to Docker label updates
+    this.eventBus.subscribe(EventTypes.DOCKER_LABELS_UPDATED, (data) => {
+      const { containerLabelsCache } = data;
+      
+      // Update our cache of Docker labels
+      this.lastDockerLabels = containerLabelsCache || {};
+      logger.debug('Updated Docker container labels cache in TraefikMonitor');
+    });
   }
   
   /**
@@ -138,10 +158,13 @@ class TraefikMonitor {
       // Update the previous count for next comparison
       this.previousStats.hostnameCount = hostnames.length;
       
+      // Merge router labels with Docker container labels
+      const mergedLabels = this.mergeContainerLabels(containerLabels, this.lastDockerLabels);
+      
       // Publish router update event
       this.eventBus.publish(EventTypes.TRAEFIK_ROUTERS_UPDATED, {
         hostnames,
-        containerLabels
+        containerLabels: mergedLabels
       });
       
       // Publish poll completed event
@@ -203,13 +226,77 @@ class TraefikMonitor {
           
           // Store router service information with hostname for later lookup
           containerLabels[hostname] = {
-            [`${this.config.traefikLabelPrefix}http.routers.${routerName}.service`]: router.service
+            [`${this.config.traefikLabelPrefix}http.routers.${routerName}.service`]: router.service,
+            routerName: routerName
           };
+          
+          logger.trace(`Processed router "${routerName}" for hostname "${hostname}" with service "${router.service}"`);
         }
       }
     }
     
     return { hostnames, containerLabels };
+  }
+  
+  /**
+   * Merge router-derived labels with actual container labels
+   * This is crucial for getting the correct DNS labels from containers
+   */
+  mergeContainerLabels(routerContainerLabels, dockerLabelsCache) {
+    logger.debug('Merging router information with Docker container labels');
+    const mergedLabels = { ...routerContainerLabels };
+    const labelPrefix = this.config.dnsLabelPrefix;
+    
+    // For each hostname
+    for (const [hostname, routerLabels] of Object.entries(routerContainerLabels)) {
+      const routerName = routerLabels.routerName;
+      const serviceName = routerLabels[`${this.config.traefikLabelPrefix}http.routers.${routerName}.service`];
+      
+      logger.trace(`Looking for container labels for hostname=${hostname}, router=${routerName}, service=${serviceName}`);
+      
+      // Look for matching containers in the Docker labels cache
+      let matchFound = false;
+      
+      // First try by service name directly
+      for (const [containerId, containerLabels] of Object.entries(dockerLabelsCache)) {
+        // Various ways a container might be related to this router/service
+        if (
+          containerId.includes(serviceName) || 
+          containerLabels[`${this.config.traefikLabelPrefix}http.routers.${routerName}.service`] === serviceName ||
+          containerLabels[`${this.config.traefikLabelPrefix}http.services.${serviceName}.loadbalancer.server.port`]
+        ) {
+          logger.trace(`Found matching container ${containerId} for service ${serviceName}`);
+          
+          // Extract DNS-specific labels
+          const dnsLabels = {};
+          for (const [key, value] of Object.entries(containerLabels)) {
+            if (key.startsWith(labelPrefix)) {
+              dnsLabels[key] = value;
+            }
+          }
+          
+          // Merge the container's DNS labels into our hostname labels
+          mergedLabels[hostname] = {
+            ...mergedLabels[hostname],
+            ...dnsLabels
+          };
+          
+          logger.trace(`Merged ${Object.keys(dnsLabels).length} DNS labels for ${hostname}`);
+          if (Object.keys(dnsLabels).length > 0) {
+            logger.debug(`Found DNS configuration labels for ${hostname}: ${JSON.stringify(dnsLabels)}`);
+          }
+          
+          matchFound = true;
+          break;
+        }
+      }
+      
+      if (!matchFound) {
+        logger.trace(`No container labels found for hostname ${hostname}`);
+      }
+    }
+    
+    return mergedLabels;
   }
 }
 
