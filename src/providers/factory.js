@@ -21,16 +21,25 @@ class DNSProviderFactory {
       // Try to load the provider module
       let ProviderClass;
       
-      // Use explicit require for known providers to avoid path issues
-      if (providerType === 'cloudflare') {
-        ProviderClass = require('./cloudflare');
-      } else {
-        // For other providers, try to load dynamically
-        const providerPath = path.join(__dirname, `${providerType}.js`);
-        if (!fs.existsSync(providerPath)) {
-          throw new Error(`Provider module not found: ${providerPath}`);
+      try {
+        // First try to load from provider folder (new structure)
+        const providerDirPath = path.join(__dirname, providerType);
+        
+        if (fs.existsSync(providerDirPath) && fs.statSync(providerDirPath).isDirectory()) {
+          // Provider directory exists, load the main provider module
+          ProviderClass = require(`./${providerType}`);
+        } else {
+          // Try to load as a single file (legacy/simple providers)
+          const providerPath = path.join(__dirname, `${providerType}.js`);
+          
+          if (fs.existsSync(providerPath)) {
+            ProviderClass = require(`./${providerType}.js`);
+          } else {
+            throw new Error(`Provider module not found: ${providerType}`);
+          }
         }
-        ProviderClass = require(`./${providerType}`);
+      } catch (error) {
+        throw new Error(`Failed to load provider module: ${error.message}`);
       }
       
       // Check if the provider exports a class (function constructor)
@@ -47,7 +56,7 @@ class DNSProviderFactory {
       return new ProviderClass(config);
     } catch (error) {
       logger.error(`Failed to create DNS provider '${providerType}': ${error.message}`);
-      throw new Error(`DNS provider '${providerType}' not found or failed to initialize`);
+      throw new Error(`DNS provider '${providerType}' not found or failed to initialize: ${error.message}`);
     }
   }
   
@@ -60,17 +69,33 @@ class DNSProviderFactory {
     
     try {
       // Read the providers directory
-      const files = fs.readdirSync(providersDir);
+      const items = fs.readdirSync(providersDir);
+      const providers = [];
       
-      // Filter for JavaScript files that aren't base.js or factory.js
-      return files
-        .filter(file => 
-          file.endsWith('.js') && 
-          file !== 'base.js' && 
-          file !== 'factory.js' &&
-          file !== 'index.js'
-        )
-        .map(file => file.replace('.js', ''));
+      // Check both directories and .js files
+      for (const item of items) {
+        const itemPath = path.join(providersDir, item);
+        
+        if (fs.statSync(itemPath).isDirectory()) {
+          // Check if this directory contains a provider.js or index.js file
+          if (
+            fs.existsSync(path.join(itemPath, 'provider.js')) || 
+            fs.existsSync(path.join(itemPath, 'index.js'))
+          ) {
+            providers.push(item);
+          }
+        } else if (
+          item.endsWith('.js') && 
+          item !== 'base.js' && 
+          item !== 'factory.js' &&
+          item !== 'index.js'
+        ) {
+          // It's a .js file that could be a provider
+          providers.push(item.replace('.js', ''));
+        }
+      }
+      
+      return providers;
     } catch (error) {
       logger.error(`Failed to list available providers: ${error.message}`);
       return [];
