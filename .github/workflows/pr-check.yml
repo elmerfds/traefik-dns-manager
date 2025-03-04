@@ -1,0 +1,35 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
+      - '.github/workflows/**'
+
+jobs:
+  build-check:
+    name: Build Docker Image Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: false
+          load: true
+          tags: traefik-dns-manager:pr-check
+          cache-from: type=gha
+      
+      - name: Verify image builds successfully
+        run: |
+          docker image inspect traefik-dns-manager:pr-check
+          echo "✅ Docker image built successfully"
