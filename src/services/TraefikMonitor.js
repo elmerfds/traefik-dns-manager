@@ -247,6 +247,10 @@ class TraefikMonitor {
     const mergedLabels = { ...routerContainerLabels };
     const labelPrefix = this.config.dnsLabelPrefix;
     
+    // For tracking changes in logging
+    const firstPoll = !this.lastMergedLabels;
+    const labelChanges = {};
+    
     // For each hostname
     for (const [hostname, routerLabels] of Object.entries(routerContainerLabels)) {
       const routerName = routerLabels.routerName;
@@ -275,9 +279,27 @@ class TraefikMonitor {
             }
           }
           
-          // Check specifically for the proxied flag and log it clearly
-          if (dnsLabels[`${labelPrefix}proxied`] === 'false') {
-            logger.info(`🔍 Found dns.cloudflare.proxied=false for ${hostname} from container ${containerId}`);
+          // Check if this is first poll or if the proxied setting has changed
+          const proxiedLabel = dnsLabels[`${labelPrefix}proxied`];
+          const previousLabels = this.lastMergedLabels?.[hostname];
+          const previousProxied = previousLabels?.[`${labelPrefix}proxied`];
+          
+          // Only log at INFO level if this is the first poll or the proxied value has changed
+          if (firstPoll || previousProxied !== proxiedLabel) {
+            if (proxiedLabel === 'false') {
+              logger.info(`🔍 Found dns.cloudflare.proxied=false for ${hostname} from container ${containerId}`);
+              // Track the change for summary
+              labelChanges[hostname] = 'unproxied';
+            } else if (proxiedLabel === 'true' && previousProxied === 'false') {
+              logger.info(`🔍 Found dns.cloudflare.proxied=true for ${hostname} from container ${containerId}`);
+              // Track the change for summary
+              labelChanges[hostname] = 'proxied';
+            }
+          } else {
+            // Use debug level for repeated information
+            if (proxiedLabel === 'false') {
+              logger.debug(`Found dns.cloudflare.proxied=false for ${hostname} from container ${containerId}`);
+            }
           }
           
           // Merge the container's DNS labels into our hostname labels
@@ -299,6 +321,18 @@ class TraefikMonitor {
         logger.debug(`No container match found for hostname ${hostname}`);
       }
     }
+    
+    // Log a summary of changes if any occurred
+    const changeCount = Object.keys(labelChanges).length;
+    if (changeCount > 0) {
+      const changeList = Object.entries(labelChanges)
+        .map(([hostname, change]) => `${hostname} (${change})`)
+        .join(', ');
+      logger.info(`DNS label changes detected for ${changeCount} hostnames: ${changeList}`);
+    }
+    
+    // Store the current labels for next comparison
+    this.lastMergedLabels = JSON.parse(JSON.stringify(mergedLabels));
     
     return mergedLabels;
   }

@@ -158,6 +158,11 @@ class DockerMonitor {
       const newCache = {};
       const dnsLabelPrefix = this.config.dnsLabelPrefix;
       
+      // For tracking changes
+      const previousContainers = Object.keys(this.containerLabelsCache);
+      const currentContainers = [];
+      const dnsLabelChanges = {};
+      
       containers.forEach(container => {
         const id = container.Id;
         const labels = container.Labels || {};
@@ -167,6 +172,7 @@ class DockerMonitor {
         if (container.Names && container.Names.length > 0) {
           const name = container.Names[0].replace(/^\//, '');
           newCache[name] = labels;
+          currentContainers.push(name);
           
           // Check for DNS-specific labels and log them for debugging
           const dnsLabels = {};
@@ -176,16 +182,70 @@ class DockerMonitor {
             }
           }
           
-          if (Object.keys(dnsLabels).length > 0) {
+          // Compare with previous labels to detect changes
+          const hasPreviousLabels = this.containerLabelsCache[name];
+          let dnsLabelsChanged = false;
+          
+          if (hasPreviousLabels) {
+            const prevLabels = this.containerLabelsCache[name];
+            
+            // Check if any DNS labels changed
+            for (const [key, value] of Object.entries(dnsLabels)) {
+              if (prevLabels[key] !== value) {
+                dnsLabelsChanged = true;
+                dnsLabelChanges[name] = true;
+                break;
+              }
+            }
+            
+            // Check if any DNS labels were removed
+            for (const key of Object.keys(prevLabels)) {
+              if (key.startsWith(dnsLabelPrefix) && dnsLabels[key] === undefined) {
+                dnsLabelsChanged = true;
+                dnsLabelChanges[name] = true;
+                break;
+              }
+            }
+          } else {
+            // New container with DNS labels
+            if (Object.keys(dnsLabels).length > 0) {
+              dnsLabelsChanged = true;
+              dnsLabelChanges[name] = true;
+            }
+          }
+          
+          // Only log at INFO level if there are changes or new containers
+          if (dnsLabelsChanged && Object.keys(dnsLabels).length > 0) {
             logger.info(`Container ${name} has DNS labels: ${JSON.stringify(dnsLabels)}`);
             
             // If container has a proxied=false label, log it prominently
             if (dnsLabels[`${dnsLabelPrefix}proxied`] === 'false') {
               logger.info(`⚠️ Container ${name} has proxied=false label - will disable Cloudflare proxy`);
             }
+          } else if (Object.keys(dnsLabels).length > 0) {
+            // No changes but still has DNS labels - log at debug level
+            logger.debug(`Container ${name} has DNS labels: ${JSON.stringify(dnsLabels)} (unchanged)`);
           }
         }
       });
+      
+      // Check for removed containers with DNS labels
+      const removedContainers = previousContainers.filter(name => !currentContainers.includes(name));
+      for (const name of removedContainers) {
+        const prevLabels = this.containerLabelsCache[name];
+        const hasDnsLabels = Object.keys(prevLabels || {}).some(key => key.startsWith(dnsLabelPrefix));
+        
+        if (hasDnsLabels) {
+          logger.info(`Container ${name} with DNS labels was removed`);
+          dnsLabelChanges[name] = true;
+        }
+      }
+      
+      // Log a summary of changes if any occurred
+      const changeCount = Object.keys(dnsLabelChanges).length;
+      if (changeCount > 0) {
+        logger.info(`DNS label changes detected on ${changeCount} containers: ${Object.keys(dnsLabelChanges).join(', ')}`);
+      }
       
       this.containerLabelsCache = newCache;
       logger.debug(`Updated container labels cache with ${containers.length} containers`);
@@ -193,7 +253,8 @@ class DockerMonitor {
       // Publish an immediate event with the updated labels
       this.eventBus.publish(EventTypes.DOCKER_LABELS_UPDATED, {
         containerLabelsCache: this.containerLabelsCache,
-        triggerSource: 'updateContainerLabelsCache'
+        triggerSource: 'updateContainerLabelsCache',
+        hasChanges: changeCount > 0
       });
       
       return this.containerLabelsCache;

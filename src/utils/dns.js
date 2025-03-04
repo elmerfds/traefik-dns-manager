@@ -104,19 +104,54 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
     const proxiedLabel = labels[`${prefix}proxied`];
     logger.debug(`Processing proxied status for ${hostname}: Label value = ${proxiedLabel}`);
     
+    // Create a simple cache to track if we've already logged this hostname's proxied status
+    if (!global.proxiedStatusCache) {
+      global.proxiedStatusCache = {};
+    }
+    
+    const previousValue = global.proxiedStatusCache[hostname];
+    
     if (proxiedLabel !== undefined) {
       // Explicitly check against string 'false' to ensure proper conversion to boolean
       // This is a critical conversion point - must be clear and reliable
       if (proxiedLabel === 'false') {
         recordConfig.proxied = false;
-        logger.info(`🔒 DNS record for ${hostname}: Setting proxied=false from label`);
+        
+        // Only log at INFO level the first time or if value changed from true
+        if (previousValue === undefined || previousValue === true) {
+          logger.info(`🔒 DNS record for ${hostname}: Setting proxied=false from label`);
+        } else {
+          // Use debug level for repeated information
+          logger.debug(`DNS record for ${hostname}: Setting proxied=false from label (unchanged)`);
+        }
+        
+        // Update the cache
+        global.proxiedStatusCache[hostname] = false;
       } else {
         recordConfig.proxied = true;
-        logger.debug(`DNS record for ${hostname}: Setting proxied=true from label value '${proxiedLabel}'`);
+        
+        // Only log at INFO if value changed from false to true
+        if (previousValue === false) {
+          logger.info(`DNS record for ${hostname}: Setting proxied=true from label (changed from false)`);
+        } else {
+          logger.debug(`DNS record for ${hostname}: Setting proxied=true from label value '${proxiedLabel}'`);
+        }
+        
+        // Update the cache
+        global.proxiedStatusCache[hostname] = true;
       }
     } else {
       recordConfig.proxied = defaults.proxied;
-      logger.debug(`DNS record for ${hostname}: Using default proxied=${defaults.proxied}`);
+      
+      // Only log at INFO if previously had explicit value
+      if (previousValue !== undefined) {
+        logger.info(`DNS record for ${hostname}: Reverting to default proxied=${defaults.proxied} (had explicit setting before)`);
+      } else {
+        logger.debug(`DNS record for ${hostname}: Using default proxied=${defaults.proxied}`);
+      }
+      
+      // Update the cache
+      global.proxiedStatusCache[hostname] = undefined;
     }
   }
   
