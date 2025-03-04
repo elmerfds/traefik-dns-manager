@@ -3,7 +3,7 @@ name: Build and Publish Docker Image
 on:
   workflow_dispatch:  # Manual trigger
   push:
-    branches: [ main, master ]
+    branches: [ main, master, dev ]
     tags: [ 'v*' ]
     paths-ignore:
       - 'README.md'
@@ -20,12 +20,12 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0  # Fetch all history for all tags and branches
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v2
       
       - name: Generate version number
         id: version
@@ -40,30 +40,38 @@ jobs:
           VERSION_TAG="${DATE_TAG}.${COMMIT_COUNT}"
           echo "VERSION=${VERSION_TAG}" >> $GITHUB_OUTPUT
           echo "DATE_TAG=${DATE_TAG}" >> $GITHUB_OUTPUT
+          
+          # Check if this is the dev branch
+          if [[ "${{ github.ref_name }}" == "dev" ]]; then
+            echo "IS_DEV=true" >> $GITHUB_OUTPUT
+          else
+            echo "IS_DEV=false" >> $GITHUB_OUTPUT
+          fi
       
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Extract metadata for Docker (Main branch)
+        id: meta-main
+        if: ${{ steps.version.outputs.IS_DEV == 'false' }}
+        uses: docker/metadata-action@v4
         with:
           images: |
             ${{ secrets.DOCKER_USERNAME }}/traefik-dns-manager
             ghcr.io/${{ github.repository }}
           tags: |
             # Latest tag for main/master
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
+            type=raw,value=latest,enable=true
             
             # Date + commit count for all builds
             type=raw,value=${{ steps.version.outputs.VERSION }}
@@ -71,12 +79,38 @@ jobs:
             # Just date for all builds
             type=raw,value=${{ steps.version.outputs.DATE_TAG }}
       
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+      - name: Extract metadata for Docker (Dev branch)
+        id: meta-dev
+        if: ${{ steps.version.outputs.IS_DEV == 'true' }}
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            ${{ secrets.DOCKER_USERNAME }}/traefik-dns-manager
+            ghcr.io/${{ github.repository }}
+          tags: |
+            # Dev tag
+            type=raw,value=dev
+            
+            # Dev with version
+            type=raw,value=dev-${{ steps.version.outputs.VERSION }}
+      
+      - name: Build and push Docker image (Main branch)
+        if: ${{ steps.version.outputs.IS_DEV == 'false' }}
+        uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-main.outputs.tags }}
+          labels: ${{ steps.meta-main.outputs.labels }}
           cache-from: type=gha
-          # cache-to: type=gha,mode=max
+      
+      - name: Build and push Docker image (Dev branch)
+        if: ${{ steps.version.outputs.IS_DEV == 'true' }}
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta-dev.outputs.tags }}
+          labels: ${{ steps.meta-dev.outputs.labels }}
+          cache-from: type=gha
+          # cache-to: type=gha,mode=max          
