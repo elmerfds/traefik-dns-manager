@@ -1,0 +1,50 @@
+# Dependabot configuration file
+# Documentation: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Check for updates to npm packages
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    # Specify labels for pull requests
+    labels:
+      - "dependencies"
+      - "security"
+    # reviewers for pull requests
+    # reviewers:
+    #   - "username"
+    # branch to create pull requests against
+    # target-branch: "main"
+    # Group dependencies in a single PR
+    groups:
+      dev-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    # Set open pull requests limit
+    open-pull-requests-limit: 10
+    
+  # Check for updates to GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "ci"
+    
+  # Check for updates to Docker
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "docker"
