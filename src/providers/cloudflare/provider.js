@@ -4,7 +4,7 @@
  */
 const axios = require('axios');
 const DNSProvider = require('../base');
-const logger = require('../../logger');
+const logger = require('../../utils/logger');
 const { convertToCloudflareFormat } = require('./converter');
 const { validateRecord } = require('./validator');
 
