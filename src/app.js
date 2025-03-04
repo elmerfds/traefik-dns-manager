@@ -83,6 +83,15 @@ async function pollTraefikAPI() {
       }
     });
     
+    // Only log at INFO level if we're starting a new poll after a Docker event
+    // or if this is the initial poll
+    if (Date.now() - lastDockerEventTime < 5000 || !global.hasCompletedInitialPoll) {
+      logger.info(`Processing ${totalHostnames} hostnames for DNS management`);
+    } else {
+      // Log at DEBUG level for routine polling
+      logger.debug(`Processing ${totalHostnames} hostnames for DNS management`);
+    }
+    
     logger.info(`Processing ${totalHostnames} hostnames for DNS management`);
     
     // Process each router to collect DNS configurations
@@ -234,6 +243,7 @@ function ensureFqdn(hostname, zone) {
 
 /**
  * Clean up orphaned DNS records
+ * @returns {number} Number of records removed
  */
 async function cleanupOrphanedRecords(activeHostnames) {
   try {
@@ -263,10 +273,16 @@ async function cleanupOrphanedRecords(activeHostnames) {
     if (orphanedRecords.length > 0) {
       logger.success(`Removed ${orphanedRecords.length} orphaned DNS records`);
     } else {
-      logger.success('No orphaned DNS records found');
+      // Only log at INFO level for initial poll, otherwise use DEBUG
+      if (!global.hasCompletedInitialPoll) {
+        logger.success('No orphaned DNS records found');
+      }
     }
+    
+    return orphanedRecords.length;
   } catch (error) {
     logger.error(`Error cleaning up orphaned records: ${error.message}`);
+    return 0;
   }
 }
 
@@ -402,6 +418,9 @@ function displaySettings(config) {
  */
 async function start() {
   try {
+    // Add flag to track if we've completed the initial poll
+    global.hasCompletedInitialPoll = false;
+    
     // Display settings before any async operations
     displaySettings(config);
     
@@ -428,6 +447,9 @@ async function start() {
     
     // Start initial polling
     await pollTraefikAPI();
+    
+    // Mark that we've completed the initial poll
+    global.hasCompletedInitialPoll = true;
     
     logger.complete('Traefik DNS Manager running successfully');
   } catch (error) {
