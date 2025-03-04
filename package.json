@@ -10,7 +10,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.7.4",
-    "dockerode": "^4.0.0"
+    "axios": "^1.8.1",
+    "dockerode": "^4.0.4"
   }
 }
