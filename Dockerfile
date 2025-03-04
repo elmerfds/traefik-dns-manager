@@ -1,19 +1,19 @@
 # Stage 1: Generate package-lock.json
-FROM node:20-alpine AS dependencies
+FROM node:23-alpine AS dependencies
 WORKDIR /app
 COPY package.json .
 RUN npm install --package-lock-only
 RUN npm install --omit=dev
 
 # Stage 2: Build the application
-FROM node:20-alpine AS build
+FROM node:23-alpine AS build
 WORKDIR /app
 COPY --from=dependencies /app/package*.json ./
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY src ./src
 
 # Stage 3: Create the production image
-FROM node:20-alpine
+FROM node:23-alpine
 WORKDIR /app
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/node_modules ./node_modules
