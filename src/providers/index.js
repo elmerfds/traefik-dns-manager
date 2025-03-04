@@ -5,10 +5,24 @@
 const DNSProvider = require('./base');
 const DNSProviderFactory = require('./factory');
 const CloudflareProvider = require('./cloudflare');
+// const Route53Provider = require('./route53');
 
-// Export as both named exports and default object
+// Provider types enum for easier reference
+const ProviderTypes = {
+  CLOUDFLARE: 'cloudflare',
+  ROUTE53: 'route53'
+};
+
+// Export all providers and utilities
 module.exports = {
+  // Base classes
   DNSProvider,
   DNSProviderFactory,
-  CloudflareProvider
+  
+  // Provider implementations
+  CloudflareProvider,
+  // Route53Provider,
+  
+  // Constants
+  ProviderTypes
 };

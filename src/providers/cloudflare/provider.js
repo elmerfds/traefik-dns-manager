@@ -1,10 +1,12 @@
 /**
  * Cloudflare DNS Provider
- * Implementation of the DNSProvider interface for Cloudflare
+ * Core implementation of the DNSProvider interface for Cloudflare
  */
 const axios = require('axios');
-const DNSProvider = require('./base');
-const logger = require('../logger');
+const DNSProvider = require('../base');
+const logger = require('../../logger');
+const { convertToCloudflareFormat } = require('./converter');
+const { validateRecord } = require('./validator');
 
 class CloudflareProvider extends DNSProvider {
   constructor(config) {
@@ -244,17 +246,23 @@ class CloudflareProvider extends DNSProvider {
         await this.init();
       }
       
+      // Validate the record first
+      validateRecord(record);
+      
       // Add management comment
       const recordWithComment = {
         ...record,
         comment: 'Managed by Traefik DNS Manager'
       };
       
-      logger.trace(`CloudflareProvider.createRecord: Sending create request to Cloudflare API: ${JSON.stringify(recordWithComment)}`);
+      // Convert to Cloudflare format if needed
+      const cloudflareRecord = convertToCloudflareFormat(recordWithComment);
+      
+      logger.trace(`CloudflareProvider.createRecord: Sending create request to Cloudflare API: ${JSON.stringify(cloudflareRecord)}`);
       
       const response = await this.client.post(
         `/zones/${this.zoneId}/dns_records`,
-        recordWithComment
+        cloudflareRecord
       );
       
       const createdRecord = response.data.result;
@@ -263,6 +271,8 @@ class CloudflareProvider extends DNSProvider {
       // Update the cache with the new record
       this.updateRecordInCache(createdRecord);
       
+      // Log at INFO level which record was created
+      logger.info(`✨ Created ${record.type} record for ${record.name}`);
       logger.success(`Created ${record.type} record for ${record.name}`);
       
       // Update stats counter if available
@@ -291,17 +301,23 @@ class CloudflareProvider extends DNSProvider {
         await this.init();
       }
       
+      // Validate the record first
+      validateRecord(record);
+      
       // Add management comment
       const recordWithComment = {
         ...record,
         comment: 'Managed by Traefik DNS Manager'
       };
       
-      logger.trace(`CloudflareProvider.updateRecord: Sending update request to Cloudflare API: ${JSON.stringify(recordWithComment)}`);
+      // Convert to Cloudflare format if needed
+      const cloudflareRecord = convertToCloudflareFormat(recordWithComment);
+      
+      logger.trace(`CloudflareProvider.updateRecord: Sending update request to Cloudflare API: ${JSON.stringify(cloudflareRecord)}`);
       
       const response = await this.client.put(
         `/zones/${this.zoneId}/dns_records/${id}`,
-        recordWithComment
+        cloudflareRecord
       );
       
       const updatedRecord = response.data.result;
@@ -310,6 +326,8 @@ class CloudflareProvider extends DNSProvider {
       // Update the cache
       this.updateRecordInCache(updatedRecord);
       
+      // Log at INFO level which record was updated
+      logger.info(`📝 Updated ${record.type} record for ${record.name}`);
       logger.success(`Updated ${record.type} record for ${record.name}`);
       
       // Update stats counter if available
@@ -336,6 +354,12 @@ class CloudflareProvider extends DNSProvider {
       if (!this.zoneId) {
         logger.trace('CloudflareProvider.deleteRecord: No zoneId, initializing first');
         await this.init();
+      }
+      
+      // Find the record in cache before deleting to log info
+      const recordToDelete = this.recordCache.records.find(r => r.id === id);
+      if (recordToDelete) {
+        logger.info(`🗑️ Deleting DNS record: ${recordToDelete.name} (${recordToDelete.type})`);
       }
       
       logger.trace(`CloudflareProvider.deleteRecord: Sending delete request to Cloudflare API`);
@@ -405,7 +429,7 @@ class CloudflareProvider extends DNSProvider {
           }
           
           // Validate the record
-          this.validateRecord(recordConfig);
+          validateRecord(recordConfig);
           
           // Find existing record in cache
           const existing = this.findRecordInCache(recordConfig.type, recordConfig.name);
@@ -462,6 +486,8 @@ class CloudflareProvider extends DNSProvider {
       for (const { record } of pendingChanges.create) {
         try {
           logger.trace(`CloudflareProvider.batchEnsureRecords: Creating record ${record.name} (${record.type})`);
+          // Log at INFO level which record will be created
+          logger.info(`✨ Creating ${record.type} record for ${record.name}`);
           const result = await this.createRecord(record);
           results.push(result);
         } catch (error) {
@@ -478,6 +504,8 @@ class CloudflareProvider extends DNSProvider {
       for (const { id, record } of pendingChanges.update) {
         try {
           logger.trace(`CloudflareProvider.batchEnsureRecords: Updating record ${record.name} (${record.type})`);
+          // Log at INFO level which record will be updated
+          logger.info(`📝 Updating ${record.type} record for ${record.name}`);
           const result = await this.updateRecord(id, record);
           results.push(result);
         } catch (error) {
@@ -504,19 +532,25 @@ class CloudflareProvider extends DNSProvider {
     }
   }
   
-  /**
-   * Check if a record needs to be updated
-   */
-  recordNeedsUpdate(existing, newRecord) {
+/**
+ * Check if a record needs to be updated
+ */
+recordNeedsUpdate(existing, newRecord) {
     logger.trace(`CloudflareProvider.recordNeedsUpdate: Comparing records for ${newRecord.name}`);
     logger.trace(`CloudflareProvider.recordNeedsUpdate: Existing: ${JSON.stringify(existing)}`);
     logger.trace(`CloudflareProvider.recordNeedsUpdate: New: ${JSON.stringify(newRecord)}`);
     
+    // For proxied records in Cloudflare, TTL is always forced to 1 (Auto)
+    // So we should ignore TTL differences for proxied records
+    const isProxiedRecord = existing.proxied === true || newRecord.proxied === true;
+    
     // Basic field comparison
-    let needsUpdate = (
-      existing.content !== newRecord.content ||
-      existing.ttl !== newRecord.ttl
-    );
+    let needsUpdate = existing.content !== newRecord.content;
+    
+    // Only compare TTL for non-proxied records
+    if (!isProxiedRecord) {
+      needsUpdate = needsUpdate || (existing.ttl !== newRecord.ttl);
+    }
     
     logger.trace(`CloudflareProvider.recordNeedsUpdate: Basic comparison - content: ${existing.content} vs ${newRecord.content}, ttl: ${existing.ttl} vs ${newRecord.ttl}`);
     
@@ -560,112 +594,19 @@ class CloudflareProvider extends DNSProvider {
         break;
     }
     
+    // If an update is needed, log the specific differences at DEBUG level
+    if (needsUpdate && logger.level >= 3) { // DEBUG level or higher
+      logger.debug(`Record ${newRecord.name} needs update:`);
+      if (existing.content !== newRecord.content) 
+        logger.debug(` - Content: ${existing.content} → ${newRecord.content}`);
+      if (!isProxiedRecord && existing.ttl !== newRecord.ttl) 
+        logger.debug(` - TTL: ${existing.ttl} → ${newRecord.ttl}`);
+      if (['A', 'AAAA', 'CNAME'].includes(newRecord.type) && existing.proxied !== newRecord.proxied)
+        logger.debug(` - Proxied: ${existing.proxied} → ${newRecord.proxied}`);
+    }
+    
     logger.trace(`CloudflareProvider.recordNeedsUpdate: Final result - needs update: ${needsUpdate}`);
     return needsUpdate;
-  }
-  
-  /**
-   * Validate a record configuration
-   */
-  validateRecord(record) {
-    logger.trace(`CloudflareProvider.validateRecord: Validating record ${record.name} (${record.type})`);
-    
-    // Common validations
-    if (!record.type) {
-      logger.trace(`CloudflareProvider.validateRecord: Record type is missing`);
-      throw new Error('Record type is required');
-    }
-    
-    if (!record.name) {
-      logger.trace(`CloudflareProvider.validateRecord: Record name is missing`);
-      throw new Error('Record name is required');
-    }
-    
-    // Type-specific validations
-    switch (record.type) {
-      case 'A':
-        if (!record.content) {
-          logger.trace(`CloudflareProvider.validateRecord: IP address is missing for A record`);
-          throw new Error('IP address is required for A records');
-        }
-        break;
-        
-      case 'AAAA':
-        if (!record.content) {
-          logger.trace(`CloudflareProvider.validateRecord: IPv6 address is missing for AAAA record`);
-          throw new Error('IPv6 address is required for AAAA records');
-        }
-        break;
-        
-      case 'CNAME':
-      case 'TXT':
-      case 'NS':
-        if (!record.content) {
-          logger.trace(`CloudflareProvider.validateRecord: Content is missing for ${record.type} record`);
-          throw new Error(`Content is required for ${record.type} records`);
-        }
-        break;
-        
-      case 'MX':
-        if (!record.content) {
-          logger.trace(`CloudflareProvider.validateRecord: Mail server is missing for MX record`);
-          throw new Error('Mail server is required for MX records');
-        }
-        // Set default priority if missing
-        if (record.priority === undefined) {
-          logger.trace(`CloudflareProvider.validateRecord: Setting default priority (10) for MX record`);
-          record.priority = 10;
-        }
-        break;
-        
-      case 'SRV':
-        if (!record.content) {
-          logger.trace(`CloudflareProvider.validateRecord: Target is missing for SRV record`);
-          throw new Error('Target is required for SRV records');
-        }
-        // Set defaults for SRV fields
-        if (record.priority === undefined) {
-          logger.trace(`CloudflareProvider.validateRecord: Setting default priority (1) for SRV record`);
-          record.priority = 1;
-        }
-        if (record.weight === undefined) {
-          logger.trace(`CloudflareProvider.validateRecord: Setting default weight (1) for SRV record`);
-          record.weight = 1;
-        }
-        if (record.port === undefined) {
-          logger.trace(`CloudflareProvider.validateRecord: Port is missing for SRV record`);
-          throw new Error('Port is required for SRV records');
-        }
-        break;
-        
-      case 'CAA':
-        if (!record.content) {
-          logger.trace(`CloudflareProvider.validateRecord: Value is missing for CAA record`);
-          throw new Error('Value is required for CAA records');
-        }
-        if (record.flags === undefined) {
-          logger.trace(`CloudflareProvider.validateRecord: Setting default flags (0) for CAA record`);
-          record.flags = 0;
-        }
-        if (!record.tag) {
-          logger.trace(`CloudflareProvider.validateRecord: Tag is missing for CAA record`);
-          throw new Error('Tag is required for CAA records');
-        }
-        break;
-        
-      default:
-        logger.warn(`Record type ${record.type} may not be fully supported`);
-        logger.trace(`CloudflareProvider.validateRecord: Unknown record type: ${record.type}`);
-    }
-    
-    // Proxied is only valid for certain record types
-    if (record.proxied && !['A', 'AAAA', 'CNAME'].includes(record.type)) {
-      logger.warn(`'proxied' is not valid for ${record.type} records. Setting to false.`);
-      logger.trace(`CloudflareProvider.validateRecord: Setting proxied=false for ${record.type} record (not supported)`);
-      record.proxied = false;
-    }
-    
-    logger.trace(`CloudflareProvider.validateRecord: Record validation successful`);
   }
 }
 
