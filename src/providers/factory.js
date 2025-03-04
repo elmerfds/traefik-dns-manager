@@ -4,7 +4,7 @@
  */
 const path = require('path');
 const fs = require('fs');
-const logger = require('../logger');
+const logger = require('../utils/logger');
 
 class DNSProviderFactory {
   /**

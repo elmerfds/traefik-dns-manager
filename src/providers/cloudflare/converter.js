@@ -2,7 +2,7 @@
  * Cloudflare record format converter utilities
  * Handles conversion between internal format and Cloudflare API format
  */
-const logger = require('../../logger');
+const logger = require('../../utils/logger');
 
 /**
  * Convert standard record format to Cloudflare API format
