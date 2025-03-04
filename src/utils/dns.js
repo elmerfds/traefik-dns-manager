@@ -102,12 +102,21 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   // Handle proxied status
   if (['A', 'AAAA', 'CNAME'].includes(recordConfig.type)) {
     const proxiedLabel = labels[`${prefix}proxied`];
+    logger.debug(`Processing proxied status for ${hostname}: Label value = ${proxiedLabel}`);
+    
     if (proxiedLabel !== undefined) {
-      recordConfig.proxied = proxiedLabel !== 'false';
-      logger.trace(`dns.extractDnsConfigFromLabels: Using label-specified proxied status: ${recordConfig.proxied}`);
+      // Explicitly check against string 'false' to ensure proper conversion to boolean
+      // This is a critical conversion point - must be clear and reliable
+      if (proxiedLabel === 'false') {
+        recordConfig.proxied = false;
+        logger.info(`🔒 DNS record for ${hostname}: Setting proxied=false from label`);
+      } else {
+        recordConfig.proxied = true;
+        logger.debug(`DNS record for ${hostname}: Setting proxied=true from label value '${proxiedLabel}'`);
+      }
     } else {
       recordConfig.proxied = defaults.proxied;
-      logger.trace(`dns.extractDnsConfigFromLabels: Using default proxied status: ${defaults.proxied}`);
+      logger.debug(`DNS record for ${hostname}: Using default proxied=${defaults.proxied}`);
     }
   }
   
