@@ -136,20 +136,6 @@ class DockerMonitor {
   }
   
   /**
-   * Get Docker events stream
-   */
-  async getEvents(filters = { type: ['container'] }) {
-    try {
-      return await this.docker.getEvents({
-        filters
-      });
-    } catch (error) {
-      logger.error(`Failed to get Docker events: ${error.message}`);
-      throw error;
-    }
-  }
-  
-  /**
    * Update the cache of container labels
    */
   async updateContainerLabelsCache() {
@@ -158,21 +144,24 @@ class DockerMonitor {
       const newCache = {};
       const dnsLabelPrefix = this.config.dnsLabelPrefix;
       
-      // For tracking changes
-      const previousContainers = Object.keys(this.containerLabelsCache);
-      const currentContainers = [];
+      // For tracking changes - use a Map to associate container IDs with their names
+      const previousContainers = new Set(Object.keys(this.containerLabelsCache));
+      const currentContainers = new Set();
+      const containerNameToId = new Map();
       const dnsLabelChanges = {};
       
       containers.forEach(container => {
         const id = container.Id;
         const labels = container.Labels || {};
         newCache[id] = labels;
+        currentContainers.add(id);
         
         // Also index by container name for easier lookup
         if (container.Names && container.Names.length > 0) {
           const name = container.Names[0].replace(/^\//, '');
           newCache[name] = labels;
-          currentContainers.push(name);
+          currentContainers.add(name);
+          containerNameToId.set(name, id); // Track which ID belongs to which name
           
           // Check for DNS-specific labels and log them for debugging
           const dnsLabels = {};
@@ -230,21 +219,38 @@ class DockerMonitor {
       });
       
       // Check for removed containers with DNS labels
-      const removedContainers = previousContainers.filter(name => !currentContainers.includes(name));
-      for (const name of removedContainers) {
-        const prevLabels = this.containerLabelsCache[name];
+      const removedContainers = Array.from(previousContainers).filter(id => !currentContainers.has(id));
+      for (const id of removedContainers) {
+        const prevLabels = this.containerLabelsCache[id];
         const hasDnsLabels = Object.keys(prevLabels || {}).some(key => key.startsWith(dnsLabelPrefix));
         
         if (hasDnsLabels) {
-          logger.info(`Container ${name} with DNS labels was removed`);
-          dnsLabelChanges[name] = true;
+          // Use a friendly name if available, otherwise the ID
+          const isName = !id.includes(':'); // Simple heuristic to distinguish names from IDs
+          logger.info(`Container ${id} with DNS labels was removed`);
+          dnsLabelChanges[id] = true;
         }
       }
       
-      // Log a summary of changes if any occurred
+      // Log a summary of changes if any occurred - using only container names when possible
       const changeCount = Object.keys(dnsLabelChanges).length;
       if (changeCount > 0) {
-        logger.info(`DNS label changes detected on ${changeCount} containers: ${Object.keys(dnsLabelChanges).join(', ')}`);
+        // Filter out duplicate entries (IDs that have a corresponding name)
+        const changedNames = Object.keys(dnsLabelChanges).filter(key => {
+          // If it's a container ID and we have a name for it, filter it out
+          const isId = key.length > 12 && /^[0-9a-f]+$/.test(key);
+          if (isId) {
+            // Check if this ID has a corresponding name in our changes
+            for (const [name, id] of containerNameToId.entries()) {
+              if (id === key && dnsLabelChanges[name]) {
+                return false; // Filter out this ID since we have the name
+              }
+            }
+          }
+          return true;
+        });
+        
+        logger.info(`DNS label changes detected on ${changedNames.length} containers: ${changedNames.join(', ')}`);
       }
       
       this.containerLabelsCache = newCache;
@@ -260,6 +266,20 @@ class DockerMonitor {
       return this.containerLabelsCache;
     } catch (error) {
       logger.error(`Error updating container labels cache: ${error.message}`);
+      throw error;
+    }
+  }
+  
+  /**
+   * Get Docker events stream
+   */
+  async getEvents(filters = { type: ['container'] }) {
+    try {
+      return await this.docker.getEvents({
+        filters
+      });
+    } catch (error) {
+      logger.error(`Failed to get Docker events: ${error.message}`);
       throw error;
     }
   }
