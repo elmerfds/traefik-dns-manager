@@ -72,7 +72,7 @@ jobs:
             type=raw,value=${{ steps.version.outputs.DATE_TAG }}
       
       - name: Build and push Docker image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
