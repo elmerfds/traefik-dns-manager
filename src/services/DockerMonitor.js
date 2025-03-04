@@ -156,6 +156,7 @@ class DockerMonitor {
     try {
       const containers = await this.listContainers();
       const newCache = {};
+      const dnsLabelPrefix = this.config.dnsLabelPrefix;
       
       containers.forEach(container => {
         const id = container.Id;
@@ -166,11 +167,34 @@ class DockerMonitor {
         if (container.Names && container.Names.length > 0) {
           const name = container.Names[0].replace(/^\//, '');
           newCache[name] = labels;
+          
+          // Check for DNS-specific labels and log them for debugging
+          const dnsLabels = {};
+          for (const [key, value] of Object.entries(labels)) {
+            if (key.startsWith(dnsLabelPrefix)) {
+              dnsLabels[key] = value;
+            }
+          }
+          
+          if (Object.keys(dnsLabels).length > 0) {
+            logger.info(`Container ${name} has DNS labels: ${JSON.stringify(dnsLabels)}`);
+            
+            // If container has a proxied=false label, log it prominently
+            if (dnsLabels[`${dnsLabelPrefix}proxied`] === 'false') {
+              logger.info(`⚠️ Container ${name} has proxied=false label - will disable Cloudflare proxy`);
+            }
+          }
         }
       });
       
       this.containerLabelsCache = newCache;
       logger.debug(`Updated container labels cache with ${containers.length} containers`);
+      
+      // Publish an immediate event with the updated labels
+      this.eventBus.publish(EventTypes.DOCKER_LABELS_UPDATED, {
+        containerLabelsCache: this.containerLabelsCache,
+        triggerSource: 'updateContainerLabelsCache'
+      });
       
       return this.containerLabelsCache;
     } catch (error) {

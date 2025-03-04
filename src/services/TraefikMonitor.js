@@ -252,7 +252,7 @@ class TraefikMonitor {
       const routerName = routerLabels.routerName;
       const serviceName = routerLabels[`${this.config.traefikLabelPrefix}http.routers.${routerName}.service`];
       
-      logger.trace(`Looking for container labels for hostname=${hostname}, router=${routerName}, service=${serviceName}`);
+      logger.debug(`Looking for container labels for hostname=${hostname}, router=${routerName}, service=${serviceName}`);
       
       // Look for matching containers in the Docker labels cache
       let matchFound = false;
@@ -265,7 +265,7 @@ class TraefikMonitor {
           containerLabels[`${this.config.traefikLabelPrefix}http.routers.${routerName}.service`] === serviceName ||
           containerLabels[`${this.config.traefikLabelPrefix}http.services.${serviceName}.loadbalancer.server.port`]
         ) {
-          logger.trace(`Found matching container ${containerId} for service ${serviceName}`);
+          logger.debug(`Found matching container ${containerId} for hostname ${hostname}`);
           
           // Extract DNS-specific labels
           const dnsLabels = {};
@@ -275,15 +275,19 @@ class TraefikMonitor {
             }
           }
           
+          // Check specifically for the proxied flag and log it clearly
+          if (dnsLabels[`${labelPrefix}proxied`] === 'false') {
+            logger.info(`🔍 Found dns.cloudflare.proxied=false for ${hostname} from container ${containerId}`);
+          }
+          
           // Merge the container's DNS labels into our hostname labels
           mergedLabels[hostname] = {
             ...mergedLabels[hostname],
             ...dnsLabels
           };
           
-          logger.trace(`Merged ${Object.keys(dnsLabels).length} DNS labels for ${hostname}`);
           if (Object.keys(dnsLabels).length > 0) {
-            logger.debug(`Found DNS configuration labels for ${hostname}: ${JSON.stringify(dnsLabels)}`);
+            logger.debug(`Applied DNS configuration for ${hostname}: ${JSON.stringify(dnsLabels)}`);
           }
           
           matchFound = true;
@@ -292,11 +296,25 @@ class TraefikMonitor {
       }
       
       if (!matchFound) {
-        logger.trace(`No container labels found for hostname ${hostname}`);
+        logger.debug(`No container match found for hostname ${hostname}`);
       }
     }
     
     return mergedLabels;
+  }
+  
+  /**
+   * Get all HTTP services from Traefik
+   */
+  async getServices() {
+    try {
+      const response = await this.client.get('/http/services');
+      logger.debug(`Retrieved ${Object.keys(response.data).length} services from Traefik API`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Failed to get Traefik services: ${error.message}`);
+      throw error;
+    }
   }
 }
 
