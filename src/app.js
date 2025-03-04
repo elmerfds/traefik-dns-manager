@@ -330,7 +330,8 @@ async function watchDockerEvents() {
  * Display configured settings on startup in a visually appealing format
  */
 function displaySettings(config) {
-  const version = '1.2.0'; // You may want to fetch this from package.json
+  const packageJson = require('../package.json');
+  const version = packageJson.version;
   
   console.log(''); // Empty line for better readability
   logger.info(`🚀 TRAEFIK DNS MANAGER v${version}`);
