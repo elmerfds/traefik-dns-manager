@@ -271,6 +271,8 @@ class CloudflareProvider extends DNSProvider {
       // Update the cache with the new record
       this.updateRecordInCache(createdRecord);
       
+      // Log at INFO level which record was created
+      logger.info(`✨ Created ${record.type} record for ${record.name}`);
       logger.success(`Created ${record.type} record for ${record.name}`);
       
       // Update stats counter if available
@@ -324,6 +326,8 @@ class CloudflareProvider extends DNSProvider {
       // Update the cache
       this.updateRecordInCache(updatedRecord);
       
+      // Log at INFO level which record was updated
+      logger.info(`📝 Updated ${record.type} record for ${record.name}`);
       logger.success(`Updated ${record.type} record for ${record.name}`);
       
       // Update stats counter if available
@@ -350,6 +354,12 @@ class CloudflareProvider extends DNSProvider {
       if (!this.zoneId) {
         logger.trace('CloudflareProvider.deleteRecord: No zoneId, initializing first');
         await this.init();
+      }
+      
+      // Find the record in cache before deleting to log info
+      const recordToDelete = this.recordCache.records.find(r => r.id === id);
+      if (recordToDelete) {
+        logger.info(`🗑️ Deleting DNS record: ${recordToDelete.name} (${recordToDelete.type})`);
       }
       
       logger.trace(`CloudflareProvider.deleteRecord: Sending delete request to Cloudflare API`);
@@ -476,6 +486,8 @@ class CloudflareProvider extends DNSProvider {
       for (const { record } of pendingChanges.create) {
         try {
           logger.trace(`CloudflareProvider.batchEnsureRecords: Creating record ${record.name} (${record.type})`);
+          // Log at INFO level which record will be created
+          logger.info(`✨ Creating ${record.type} record for ${record.name}`);
           const result = await this.createRecord(record);
           results.push(result);
         } catch (error) {
@@ -492,6 +504,8 @@ class CloudflareProvider extends DNSProvider {
       for (const { id, record } of pendingChanges.update) {
         try {
           logger.trace(`CloudflareProvider.batchEnsureRecords: Updating record ${record.name} (${record.type})`);
+          // Log at INFO level which record will be updated
+          logger.info(`📝 Updating ${record.type} record for ${record.name}`);
           const result = await this.updateRecord(id, record);
           results.push(result);
         } catch (error) {
