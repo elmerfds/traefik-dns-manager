@@ -1,6 +1,6 @@
 {
   "name": "traefik-dns-manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Automatically manage Cloudflare DNS records based on Traefik routing configuration",
   "main": "src/app.js",
   "scripts": {
