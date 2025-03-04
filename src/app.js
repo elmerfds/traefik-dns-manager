@@ -30,6 +30,12 @@ global.statsCounter = {
   total: 0
 };
 
+// Keep track of previous poll statistics to reduce logging noise
+let previousPollStats = {
+  hostnameCount: 0,
+  upToDateCount: 0
+};
+
 // Lock to prevent parallel polling
 let isPolling = false;
 // Track last docker event time to prevent duplicate polling
@@ -83,7 +89,18 @@ async function pollTraefikAPI() {
       }
     });
     
-    logger.info(`Processing ${totalHostnames} hostnames for DNS management`);
+    // Only log hostname count if it changed from previous poll
+    const hasChanged = previousPollStats.hostnameCount !== totalHostnames;
+    
+    if (hasChanged) {
+      logger.info(`Processing ${totalHostnames} hostnames for DNS management`);
+    } else {
+      // Log at debug level instead of info when nothing has changed
+      logger.debug(`Processing ${totalHostnames} hostnames for DNS management`);
+    }
+    
+    // Update the previous count for next comparison
+    previousPollStats.hostnameCount = totalHostnames;
     
     // Process each router to collect DNS configurations
     for (const [routerName, router] of Object.entries(routers)) {
@@ -143,8 +160,19 @@ async function pollTraefikAPI() {
         logger.success(`Updated ${global.statsCounter.updated} existing DNS records`);
       }
       
+      // Only log "up to date" records if there were changes
       if (global.statsCounter.upToDate > 0) {
-        logger.info(`${global.statsCounter.upToDate} DNS records are up to date`);
+        const hasUpToDateChanged = previousPollStats.upToDateCount !== global.statsCounter.upToDate;
+        
+        if (hasUpToDateChanged) {
+          logger.info(`${global.statsCounter.upToDate} DNS records are up to date`);
+        } else {
+          // Log at debug level instead of info when nothing has changed
+          logger.debug(`${global.statsCounter.upToDate} DNS records are up to date`);
+        }
+        
+        // Update for next comparison
+        previousPollStats.upToDateCount = global.statsCounter.upToDate;
       }
       
       if (global.statsCounter.errors > 0) {
