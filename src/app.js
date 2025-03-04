@@ -30,6 +30,12 @@ global.statsCounter = {
   total: 0
 };
 
+// Keep track of previous poll statistics to reduce logging noise
+let previousPollStats = {
+  hostnameCount: 0,
+  upToDateCount: 0
+};
+
 // Lock to prevent parallel polling
 let isPolling = false;
 // Track last docker event time to prevent duplicate polling
@@ -83,16 +89,18 @@ async function pollTraefikAPI() {
       }
     });
     
-    // Only log at INFO level if we're starting a new poll after a Docker event
-    // or if this is the initial poll
-    if (Date.now() - lastDockerEventTime < 5000 || !global.hasCompletedInitialPoll) {
+    // Only log hostname count if it changed from previous poll
+    const hasChanged = previousPollStats.hostnameCount !== totalHostnames;
+    
+    if (hasChanged) {
       logger.info(`Processing ${totalHostnames} hostnames for DNS management`);
     } else {
-      // Log at DEBUG level for routine polling
+      // Log at debug level instead of info when nothing has changed
       logger.debug(`Processing ${totalHostnames} hostnames for DNS management`);
     }
     
-    logger.info(`Processing ${totalHostnames} hostnames for DNS management`);
+    // Update the previous count for next comparison
+    previousPollStats.hostnameCount = totalHostnames;
     
     // Process each router to collect DNS configurations
     for (const [routerName, router] of Object.entries(routers)) {
@@ -152,8 +160,19 @@ async function pollTraefikAPI() {
         logger.success(`Updated ${global.statsCounter.updated} existing DNS records`);
       }
       
+      // Only log "up to date" records if there were changes
       if (global.statsCounter.upToDate > 0) {
-        logger.info(`${global.statsCounter.upToDate} DNS records are up to date`);
+        const hasUpToDateChanged = previousPollStats.upToDateCount !== global.statsCounter.upToDate;
+        
+        if (hasUpToDateChanged) {
+          logger.info(`${global.statsCounter.upToDate} DNS records are up to date`);
+        } else {
+          // Log at debug level instead of info when nothing has changed
+          logger.debug(`${global.statsCounter.upToDate} DNS records are up to date`);
+        }
+        
+        // Update for next comparison
+        previousPollStats.upToDateCount = global.statsCounter.upToDate;
       }
       
       if (global.statsCounter.errors > 0) {
@@ -243,7 +262,6 @@ function ensureFqdn(hostname, zone) {
 
 /**
  * Clean up orphaned DNS records
- * @returns {number} Number of records removed
  */
 async function cleanupOrphanedRecords(activeHostnames) {
   try {
@@ -273,16 +291,10 @@ async function cleanupOrphanedRecords(activeHostnames) {
     if (orphanedRecords.length > 0) {
       logger.success(`Removed ${orphanedRecords.length} orphaned DNS records`);
     } else {
-      // Only log at INFO level for initial poll, otherwise use DEBUG
-      if (!global.hasCompletedInitialPoll) {
-        logger.success('No orphaned DNS records found');
-      }
+      logger.success('No orphaned DNS records found');
     }
-    
-    return orphanedRecords.length;
   } catch (error) {
     logger.error(`Error cleaning up orphaned records: ${error.message}`);
-    return 0;
   }
 }
 
@@ -418,9 +430,6 @@ function displaySettings(config) {
  */
 async function start() {
   try {
-    // Add flag to track if we've completed the initial poll
-    global.hasCompletedInitialPoll = false;
-    
     // Display settings before any async operations
     displaySettings(config);
     
@@ -447,9 +456,6 @@ async function start() {
     
     // Start initial polling
     await pollTraefikAPI();
-    
-    // Mark that we've completed the initial poll
-    global.hasCompletedInitialPoll = true;
     
     logger.complete('Traefik DNS Manager running successfully');
   } catch (error) {
