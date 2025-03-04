@@ -114,9 +114,16 @@ function validateRecord(record) {
     record.proxied = false;
   }
   
-  // TTL must be either 1 (automatic) or at least 60 seconds
-  if (record.ttl !== 1 && record.ttl < 60) {
-    logger.warn(`TTL value ${record.ttl} is too low for Cloudflare. Setting to 60 seconds.`);
+  // Check for proxied records with custom TTL (which Cloudflare will ignore)
+  if (record.proxied === true && record.ttl !== 1 && record.ttl !== undefined) {
+    logger.warn(`TTL value ${record.ttl} for record ${record.name} (${record.type}) will be ignored because the record is proxied. Cloudflare forces TTL=Auto for proxied records.`);
+    // Force TTL to 1 (Auto) for proxied records to match what Cloudflare will do
+    record.ttl = 1;
+  }
+  
+  // TTL must be either 1 (automatic) or at least 60 seconds for non-proxied records
+  else if (record.ttl !== 1 && record.ttl < 60) {
+    logger.warn(`TTL value ${record.ttl} is too low for record ${record.name} (${record.type}). Setting to 60 seconds.`);
     logger.trace(`cloudflare.validator: Adjusting TTL from ${record.ttl} to 60 (minimum)`);
     record.ttl = 60;
   }
