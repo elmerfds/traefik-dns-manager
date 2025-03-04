@@ -532,19 +532,25 @@ class CloudflareProvider extends DNSProvider {
     }
   }
   
-  /**
-   * Check if a record needs to be updated
-   */
-  recordNeedsUpdate(existing, newRecord) {
+/**
+ * Check if a record needs to be updated
+ */
+recordNeedsUpdate(existing, newRecord) {
     logger.trace(`CloudflareProvider.recordNeedsUpdate: Comparing records for ${newRecord.name}`);
     logger.trace(`CloudflareProvider.recordNeedsUpdate: Existing: ${JSON.stringify(existing)}`);
     logger.trace(`CloudflareProvider.recordNeedsUpdate: New: ${JSON.stringify(newRecord)}`);
     
+    // For proxied records in Cloudflare, TTL is always forced to 1 (Auto)
+    // So we should ignore TTL differences for proxied records
+    const isProxiedRecord = existing.proxied === true || newRecord.proxied === true;
+    
     // Basic field comparison
-    let needsUpdate = (
-      existing.content !== newRecord.content ||
-      existing.ttl !== newRecord.ttl
-    );
+    let needsUpdate = existing.content !== newRecord.content;
+    
+    // Only compare TTL for non-proxied records
+    if (!isProxiedRecord) {
+      needsUpdate = needsUpdate || (existing.ttl !== newRecord.ttl);
+    }
     
     logger.trace(`CloudflareProvider.recordNeedsUpdate: Basic comparison - content: ${existing.content} vs ${newRecord.content}, ttl: ${existing.ttl} vs ${newRecord.ttl}`);
     
@@ -586,6 +592,17 @@ class CloudflareProvider extends DNSProvider {
           caaFlagsDiff ||
           caaTagDiff;
         break;
+    }
+    
+    // If an update is needed, log the specific differences at DEBUG level
+    if (needsUpdate && logger.level >= 3) { // DEBUG level or higher
+      logger.debug(`Record ${newRecord.name} needs update:`);
+      if (existing.content !== newRecord.content) 
+        logger.debug(` - Content: ${existing.content} → ${newRecord.content}`);
+      if (!isProxiedRecord && existing.ttl !== newRecord.ttl) 
+        logger.debug(` - TTL: ${existing.ttl} → ${newRecord.ttl}`);
+      if (['A', 'AAAA', 'CNAME'].includes(newRecord.type) && existing.proxied !== newRecord.proxied)
+        logger.debug(` - Proxied: ${existing.proxied} → ${newRecord.proxied}`);
     }
     
     logger.trace(`CloudflareProvider.recordNeedsUpdate: Final result - needs update: ${needsUpdate}`);
