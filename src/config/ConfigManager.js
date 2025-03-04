@@ -2,7 +2,8 @@
  * Configuration management for Traefik DNS Manager
  */
 const axios = require('axios');
-const logger = require('./logger');
+const logger = require('../utils/logger');
+const EnvironmentLoader = require('./EnvironmentLoader');
 
 // Semaphore for IP update process
 let ipUpdateInProgress = false;
@@ -17,39 +18,39 @@ class ConfigManager {
     };
     
     // DNS Provider configuration
-    this.dnsProvider = process.env.DNS_PROVIDER || 'cloudflare';
+    this.dnsProvider = EnvironmentLoader.getString('DNS_PROVIDER', 'cloudflare');
     
     // Provider-specific settings
     // Cloudflare settings
-    this.cloudflareToken = process.env.CLOUDFLARE_TOKEN;
-    this.cloudflareZone = process.env.CLOUDFLARE_ZONE;
+    this.cloudflareToken = EnvironmentLoader.getString('CLOUDFLARE_TOKEN');
+    this.cloudflareZone = EnvironmentLoader.getString('CLOUDFLARE_ZONE');
     
     // Route53 settings (for future implementation)
-    this.route53AccessKey = process.env.ROUTE53_ACCESS_KEY;
-    this.route53SecretKey = process.env.ROUTE53_SECRET_KEY;
-    this.route53Zone = process.env.ROUTE53_ZONE;
+    this.route53AccessKey = EnvironmentLoader.getString('ROUTE53_ACCESS_KEY');
+    this.route53SecretKey = EnvironmentLoader.getString('ROUTE53_SECRET_KEY');
+    this.route53Zone = EnvironmentLoader.getString('ROUTE53_ZONE');
     
     // Digital Ocean settings (for future implementation)
-    this.digitalOceanToken = process.env.DO_TOKEN;
-    this.digitalOceanDomain = process.env.DO_DOMAIN;
+    this.digitalOceanToken = EnvironmentLoader.getString('DO_TOKEN');
+    this.digitalOceanDomain = EnvironmentLoader.getString('DO_DOMAIN');
     
     // Validate required settings based on provider
     this.validateProviderConfig();
     
     // Traefik API settings
-    this.traefikApiUrl = process.env.TRAEFIK_API_URL || 'http://traefik:8080/api';
-    this.traefikApiUsername = process.env.TRAEFIK_API_USERNAME;
-    this.traefikApiPassword = process.env.TRAEFIK_API_PASSWORD;
+    this.traefikApiUrl = EnvironmentLoader.getString('TRAEFIK_API_URL', 'http://traefik:8080/api');
+    this.traefikApiUsername = EnvironmentLoader.getString('TRAEFIK_API_USERNAME');
+    this.traefikApiPassword = EnvironmentLoader.getString('TRAEFIK_API_PASSWORD');
     
     // Label prefixes
-    this.dnsLabelPrefix = process.env.DNS_LABEL_PREFIX || 'dns.cloudflare.';
-    this.traefikLabelPrefix = process.env.TRAEFIK_LABEL_PREFIX || 'traefik.';
+    this.dnsLabelPrefix = EnvironmentLoader.getString('DNS_LABEL_PREFIX', 'dns.cloudflare.');
+    this.traefikLabelPrefix = EnvironmentLoader.getString('TRAEFIK_LABEL_PREFIX', 'traefik.');
     
     // Global DNS defaults
-    this.defaultRecordType = process.env.DNS_DEFAULT_TYPE || 'CNAME';
-    this.defaultContent = process.env.DNS_DEFAULT_CONTENT || this.getProviderDomain();
-    this.defaultProxied = process.env.DNS_DEFAULT_PROXIED !== 'false';
-    this.defaultTTL = parseInt(process.env.DNS_DEFAULT_TTL || '1', 10);
+    this.defaultRecordType = EnvironmentLoader.getString('DNS_DEFAULT_TYPE', 'CNAME');
+    this.defaultContent = EnvironmentLoader.getString('DNS_DEFAULT_CONTENT', this.getProviderDomain());
+    this.defaultProxied = EnvironmentLoader.getBool('DNS_DEFAULT_PROXIED', true);
+    this.defaultTTL = EnvironmentLoader.getInt('DNS_DEFAULT_TTL', 1);
     
     // Record type specific defaults - we'll set A content after IP discovery
     this.recordDefaults = {
@@ -58,57 +59,57 @@ class ConfigManager {
         proxied: process.env.DNS_DEFAULT_A_PROXIED !== undefined ? 
                  process.env.DNS_DEFAULT_A_PROXIED !== 'false' : 
                  this.defaultProxied,
-        ttl: parseInt(process.env.DNS_DEFAULT_A_TTL || this.defaultTTL, 10)
+        ttl: EnvironmentLoader.getInt('DNS_DEFAULT_A_TTL', this.defaultTTL)
       },
       AAAA: {
         content: '',  // Will be set after IP discovery
         proxied: process.env.DNS_DEFAULT_AAAA_PROXIED !== undefined ? 
                  process.env.DNS_DEFAULT_AAAA_PROXIED !== 'false' : 
                  this.defaultProxied,
-        ttl: parseInt(process.env.DNS_DEFAULT_AAAA_TTL || this.defaultTTL, 10)
+        ttl: EnvironmentLoader.getInt('DNS_DEFAULT_AAAA_TTL', this.defaultTTL)
       },
       CNAME: {
-        content: process.env.DNS_DEFAULT_CNAME_CONTENT || this.defaultContent || '',
+        content: EnvironmentLoader.getString('DNS_DEFAULT_CNAME_CONTENT', this.defaultContent || ''),
         proxied: process.env.DNS_DEFAULT_CNAME_PROXIED !== undefined ? 
                  process.env.DNS_DEFAULT_CNAME_PROXIED !== 'false' : 
                  this.defaultProxied,
-        ttl: parseInt(process.env.DNS_DEFAULT_CNAME_TTL || this.defaultTTL, 10)
+        ttl: EnvironmentLoader.getInt('DNS_DEFAULT_CNAME_TTL', this.defaultTTL)
       },
       MX: {
-        content: process.env.DNS_DEFAULT_MX_CONTENT || '',
-        priority: parseInt(process.env.DNS_DEFAULT_MX_PRIORITY || '10', 10),
-        ttl: parseInt(process.env.DNS_DEFAULT_MX_TTL || this.defaultTTL, 10)
+        content: EnvironmentLoader.getString('DNS_DEFAULT_MX_CONTENT', ''),
+        priority: EnvironmentLoader.getInt('DNS_DEFAULT_MX_PRIORITY', 10),
+        ttl: EnvironmentLoader.getInt('DNS_DEFAULT_MX_TTL', this.defaultTTL)
       },
       TXT: {
-        content: process.env.DNS_DEFAULT_TXT_CONTENT || '',
-        ttl: parseInt(process.env.DNS_DEFAULT_TXT_TTL || this.defaultTTL, 10)
+        content: EnvironmentLoader.getString('DNS_DEFAULT_TXT_CONTENT', ''),
+        ttl: EnvironmentLoader.getInt('DNS_DEFAULT_TXT_TTL', this.defaultTTL)
       },
       SRV: {
-        content: process.env.DNS_DEFAULT_SRV_CONTENT || '',
-        priority: parseInt(process.env.DNS_DEFAULT_SRV_PRIORITY || '1', 10),
-        weight: parseInt(process.env.DNS_DEFAULT_SRV_WEIGHT || '1', 10),
-        port: parseInt(process.env.DNS_DEFAULT_SRV_PORT || '80', 10),
-        ttl: parseInt(process.env.DNS_DEFAULT_SRV_TTL || this.defaultTTL, 10)
+        content: EnvironmentLoader.getString('DNS_DEFAULT_SRV_CONTENT', ''),
+        priority: EnvironmentLoader.getInt('DNS_DEFAULT_SRV_PRIORITY', 1),
+        weight: EnvironmentLoader.getInt('DNS_DEFAULT_SRV_WEIGHT', 1),
+        port: EnvironmentLoader.getInt('DNS_DEFAULT_SRV_PORT', 80),
+        ttl: EnvironmentLoader.getInt('DNS_DEFAULT_SRV_TTL', this.defaultTTL)
       },
       CAA: {
-        content: process.env.DNS_DEFAULT_CAA_CONTENT || '',
-        flags: parseInt(process.env.DNS_DEFAULT_CAA_FLAGS || '0', 10),
-        tag: process.env.DNS_DEFAULT_CAA_TAG || 'issue',
-        ttl: parseInt(process.env.DNS_DEFAULT_CAA_TTL || this.defaultTTL, 10)
+        content: EnvironmentLoader.getString('DNS_DEFAULT_CAA_CONTENT', ''),
+        flags: EnvironmentLoader.getInt('DNS_DEFAULT_CAA_FLAGS', 0),
+        tag: EnvironmentLoader.getString('DNS_DEFAULT_CAA_TAG', 'issue'),
+        ttl: EnvironmentLoader.getInt('DNS_DEFAULT_CAA_TTL', this.defaultTTL)
       }
     };
     
     // Application behavior
-    this.dockerSocket = process.env.DOCKER_SOCKET || '/var/run/docker.sock';
-    this.pollInterval = parseInt(process.env.POLL_INTERVAL || '60000', 10);
-    this.watchDockerEvents = process.env.WATCH_DOCKER_EVENTS !== 'false';
-    this.cleanupOrphaned = process.env.CLEANUP_ORPHANED === 'true';
+    this.dockerSocket = EnvironmentLoader.getString('DOCKER_SOCKET', '/var/run/docker.sock');
+    this.pollInterval = EnvironmentLoader.getInt('POLL_INTERVAL', 60000);
+    this.watchDockerEvents = EnvironmentLoader.getBool('WATCH_DOCKER_EVENTS', true);
+    this.cleanupOrphaned = EnvironmentLoader.getBool('CLEANUP_ORPHANED', false);
     
     // Cache refresh interval in milliseconds (default: 1 hour)
-    this.cacheRefreshInterval = parseInt(process.env.DNS_CACHE_REFRESH_INTERVAL || '3600000', 10);
+    this.cacheRefreshInterval = EnvironmentLoader.getInt('DNS_CACHE_REFRESH_INTERVAL', 3600000);
     
     // IP refresh interval in milliseconds (default: 1 hour)
-    this.ipRefreshInterval = parseInt(process.env.IP_REFRESH_INTERVAL || '3600000', 10);
+    this.ipRefreshInterval = EnvironmentLoader.getInt('IP_REFRESH_INTERVAL', 3600000);
     
     // Schedule immediate IP update and then periodic refresh
     this.updatePublicIPs().then(() => {

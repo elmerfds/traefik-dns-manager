@@ -1,38 +1,8 @@
 /**
- * Utility functions for Traefik DNS Manager
+ * DNS-related utility functions
  */
 const logger = require('./logger');
 const { LOG_LEVELS } = require('./logger');
-
-/**
- * Extract hostnames from a Traefik router rule
- * Supports both v1 and v2 formats
- */
-function extractHostnamesFromRule(rule) {
-  logger.trace(`utils.extractHostnamesFromRule: Extracting hostnames from rule: ${rule}`);
-  
-  const hostnames = [];
-  
-  // Handle Traefik v2 format: Host(`example.com`)
-  const v2HostRegex = /Host\(`([^`]+)`\)/g;
-  let match;
-  
-  while ((match = v2HostRegex.exec(rule)) !== null) {
-    logger.trace(`utils.extractHostnamesFromRule: Found v2 hostname: ${match[1]}`);
-    hostnames.push(match[1]);
-  }
-  
-  // Handle Traefik v1 format: Host:example.com
-  const v1HostRegex = /Host:([a-zA-Z0-9.-]+)/g;
-  
-  while ((match = v1HostRegex.exec(rule)) !== null) {
-    logger.trace(`utils.extractHostnamesFromRule: Found v1 hostname: ${match[1]}`);
-    hostnames.push(match[1]);
-  }
-  
-  logger.trace(`utils.extractHostnamesFromRule: Extracted ${hostnames.length} hostnames: ${hostnames.join(', ')}`);
-  return hostnames;
-}
 
 /**
  * Check if a hostname is an apex/root domain
@@ -41,17 +11,17 @@ function extractHostnamesFromRule(rule) {
  * @returns {boolean} - True if the hostname is an apex domain
  */
 function isApexDomain(hostname, zone) {
-  logger.trace(`utils.isApexDomain: Checking if ${hostname} is apex domain for zone ${zone}`);
+  logger.trace(`dns.isApexDomain: Checking if ${hostname} is apex domain for zone ${zone}`);
   
   // Remove trailing dot if present
   const cleanHostname = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
   const cleanZone = zone.endsWith('.') ? zone.slice(0, -1) : zone;
   
-  logger.trace(`utils.isApexDomain: Cleaned hostname: ${cleanHostname}, cleaned zone: ${cleanZone}`);
+  logger.trace(`dns.isApexDomain: Cleaned hostname: ${cleanHostname}, cleaned zone: ${cleanZone}`);
   
   // If the hostname equals the zone, it's an apex domain
   const isApex = cleanHostname === cleanZone;
-  logger.trace(`utils.isApexDomain: Result: ${isApex}`);
+  logger.trace(`dns.isApexDomain: Result: ${isApex}`);
   
   return isApex;
 }
@@ -60,8 +30,8 @@ function isApexDomain(hostname, zone) {
  * Extract DNS configuration from container labels
  */
 function extractDnsConfigFromLabels(labels, config, hostname) {
-  logger.trace(`utils.extractDnsConfigFromLabels: Extracting DNS config for ${hostname}`);
-  logger.trace(`utils.extractDnsConfigFromLabels: Label count: ${Object.keys(labels).length}`);
+  logger.trace(`dns.extractDnsConfigFromLabels: Extracting DNS config for ${hostname}`);
+  logger.trace(`dns.extractDnsConfigFromLabels: Label count: ${Object.keys(labels).length}`);
   
   if (logger.level >= LOG_LEVELS.TRACE) {
     // In TRACE mode, log all DNS-related labels
@@ -69,7 +39,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
       .filter(([key]) => key.startsWith(config.dnsLabelPrefix))
       .map(([key, value]) => `${key}=${value}`);
       
-    logger.trace(`utils.extractDnsConfigFromLabels: DNS-related labels: ${dnsLabels.length ? dnsLabels.join(', ') : 'none'}`);
+    logger.trace(`dns.extractDnsConfigFromLabels: DNS-related labels: ${dnsLabels.length ? dnsLabels.join(', ') : 'none'}`);
   }
   
   const prefix = config.dnsLabelPrefix;
@@ -81,14 +51,14 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   let recordType = labels[`${prefix}type`];
   if (!recordType) {
     recordType = isApex ? 'A' : config.defaultRecordType;
-    logger.trace(`utils.extractDnsConfigFromLabels: Using default record type: ${recordType}`);
+    logger.trace(`dns.extractDnsConfigFromLabels: Using default record type: ${recordType}`);
   } else {
-    logger.trace(`utils.extractDnsConfigFromLabels: Using label-specified record type: ${recordType}`);
+    logger.trace(`dns.extractDnsConfigFromLabels: Using label-specified record type: ${recordType}`);
   }
   
   // Get defaults for this record type
   const defaults = config.getDefaultsForType(recordType);
-  logger.trace(`utils.extractDnsConfigFromLabels: Using defaults for type ${recordType}: ${JSON.stringify(defaults)}`);
+  logger.trace(`dns.extractDnsConfigFromLabels: Using defaults for type ${recordType}: ${JSON.stringify(defaults)}`);
   
   // Build basic record config
   const recordConfig = {
@@ -105,28 +75,28 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
     if (isApex && (recordType === 'CNAME' || recordType === 'A')) {
       // For apex domains, we should use an A record
       recordConfig.type = 'A';
-      logger.trace(`utils.extractDnsConfigFromLabels: Converting to A record for apex domain`);
+      logger.trace(`dns.extractDnsConfigFromLabels: Converting to A record for apex domain`);
       
       // Get IP if available, otherwise set flag for async IP lookup
       const ip = config.getPublicIPSync();
       if (ip) {
         recordConfig.content = ip;
-        logger.trace(`utils.extractDnsConfigFromLabels: Using IP from cache: ${ip}`);
+        logger.trace(`dns.extractDnsConfigFromLabels: Using IP from cache: ${ip}`);
       } else {
         // Flag this record as needing async IP lookup
         recordConfig.needsIpLookup = true;
         recordConfig.content = 'pending'; // Temporary placeholder
-        logger.trace(`utils.extractDnsConfigFromLabels: Flagging for async IP lookup`);
+        logger.trace(`dns.extractDnsConfigFromLabels: Flagging for async IP lookup`);
       }
       
       logger.debug(`Apex domain detected for ${hostname}, using A record with IP: ${recordConfig.content || 'to be determined'}`);
     } else {
       recordConfig.content = defaults.content;
-      logger.trace(`utils.extractDnsConfigFromLabels: Using default content: ${defaults.content}`);
+      logger.trace(`dns.extractDnsConfigFromLabels: Using default content: ${defaults.content}`);
     }
   } else {
     recordConfig.content = content;
-    logger.trace(`utils.extractDnsConfigFromLabels: Using label-specified content: ${content}`);
+    logger.trace(`dns.extractDnsConfigFromLabels: Using label-specified content: ${content}`);
   }
   
   // Handle proxied status
@@ -134,10 +104,10 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
     const proxiedLabel = labels[`${prefix}proxied`];
     if (proxiedLabel !== undefined) {
       recordConfig.proxied = proxiedLabel !== 'false';
-      logger.trace(`utils.extractDnsConfigFromLabels: Using label-specified proxied status: ${recordConfig.proxied}`);
+      logger.trace(`dns.extractDnsConfigFromLabels: Using label-specified proxied status: ${recordConfig.proxied}`);
     } else {
       recordConfig.proxied = defaults.proxied;
-      logger.trace(`utils.extractDnsConfigFromLabels: Using default proxied status: ${defaults.proxied}`);
+      logger.trace(`dns.extractDnsConfigFromLabels: Using default proxied status: ${defaults.proxied}`);
     }
   }
   
@@ -148,7 +118,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
         labels[`${prefix}priority`] || defaults.priority, 
         10
       );
-      logger.trace(`utils.extractDnsConfigFromLabels: MX priority set to ${recordConfig.priority}`);
+      logger.trace(`dns.extractDnsConfigFromLabels: MX priority set to ${recordConfig.priority}`);
       break;
       
     case 'SRV':
@@ -164,7 +134,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
         labels[`${prefix}port`] || defaults.port, 
         10
       );
-      logger.trace(`utils.extractDnsConfigFromLabels: SRV fields - priority: ${recordConfig.priority}, weight: ${recordConfig.weight}, port: ${recordConfig.port}`);
+      logger.trace(`dns.extractDnsConfigFromLabels: SRV fields - priority: ${recordConfig.priority}, weight: ${recordConfig.weight}, port: ${recordConfig.port}`);
       break;
       
     case 'CAA':
@@ -173,16 +143,15 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
         10
       );
       recordConfig.tag = labels[`${prefix}tag`] || defaults.tag;
-      logger.trace(`utils.extractDnsConfigFromLabels: CAA fields - flags: ${recordConfig.flags}, tag: ${recordConfig.tag}`);
+      logger.trace(`dns.extractDnsConfigFromLabels: CAA fields - flags: ${recordConfig.flags}, tag: ${recordConfig.tag}`);
       break;
   }
   
-  logger.trace(`utils.extractDnsConfigFromLabels: Final record config: ${JSON.stringify(recordConfig)}`);
+  logger.trace(`dns.extractDnsConfigFromLabels: Final record config: ${JSON.stringify(recordConfig)}`);
   return recordConfig;
 }
 
 module.exports = {
-  extractHostnamesFromRule,
-  extractDnsConfigFromLabels,
-  isApexDomain
+  isApexDomain,
+  extractDnsConfigFromLabels
 };
