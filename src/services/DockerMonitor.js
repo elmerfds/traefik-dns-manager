@@ -5,6 +5,7 @@
 const Docker = require('dockerode');
 const logger = require('../utils/logger');
 const EventTypes = require('../events/EventTypes');
+const { getLabelValue } = require('../utils/dns');
 
 class DockerMonitor {
   constructor(config, eventBus) {
@@ -146,7 +147,8 @@ class DockerMonitor {
     try {
       const containers = await this.listContainers();
       const newCache = {};
-      const dnsLabelPrefix = this.config.dnsLabelPrefix;
+      const genericPrefix = this.config.genericLabelPrefix;
+      const providerPrefix = this.config.dnsLabelPrefix;
       
       // New ID to name mapping
       const containerIdToName = new Map();
@@ -189,8 +191,16 @@ class DockerMonitor {
           
           // Check for DNS-specific labels and log them for debugging
           const dnsLabels = {};
+          // First, collect provider-specific labels
           for (const [key, value] of Object.entries(labels)) {
-            if (key.startsWith(dnsLabelPrefix)) {
+            if (key.startsWith(providerPrefix)) {
+              dnsLabels[key] = value;
+            }
+          }
+          // Then collect generic DNS labels
+          for (const [key, value] of Object.entries(labels)) {
+            if (key.startsWith(genericPrefix) && 
+                !key.startsWith(providerPrefix)) {
               dnsLabels[key] = value;
             }
           }
@@ -213,7 +223,8 @@ class DockerMonitor {
             
             // Check if any DNS labels were removed
             for (const key of Object.keys(prevLabels)) {
-              if (key.startsWith(dnsLabelPrefix) && dnsLabels[key] === undefined) {
+              if ((key.startsWith(genericPrefix) || key.startsWith(providerPrefix)) && 
+                  dnsLabels[key] === undefined) {
                 dnsLabelsChanged = true;
                 dnsLabelChanges[name] = true;
                 break;
@@ -231,18 +242,19 @@ class DockerMonitor {
           if (dnsLabelsChanged && Object.keys(dnsLabels).length > 0) {
             logger.info(`Container ${name} has DNS labels: ${JSON.stringify(dnsLabels)}`);
             
-            // If container has a proxied=false label, log it prominently
-            if (dnsLabels[`${dnsLabelPrefix}proxied`] === 'false') {
+            // Check for important label settings - use getLabelValue for consistent precedence
+            const proxiedLabel = getLabelValue(labels, genericPrefix, providerPrefix, 'proxied', null);
+            if (proxiedLabel === 'false') {
               logger.info(`⚠️ Container ${name} has proxied=false label - will disable Cloudflare proxy`);
             }
             
-            // If container has skip=true label, log it prominently
-            if (dnsLabels[`${dnsLabelPrefix}skip`] === 'true') {
+            const skipLabel = getLabelValue(labels, genericPrefix, providerPrefix, 'skip', null);
+            if (skipLabel === 'true') {
               logger.info(`⚠️ Container ${name} has skip=true label - will skip DNS management`);
             }
             
-            // If container has manage=true label, log it prominently
-            if (dnsLabels[`${dnsLabelPrefix}manage`] === 'true') {
+            const manageLabel = getLabelValue(labels, genericPrefix, providerPrefix, 'manage', null);
+            if (manageLabel === 'true') {
               logger.info(`⚠️ Container ${name} has manage=true label - will enable DNS management`);
             }
           } else if (Object.keys(dnsLabels).length > 0) {
@@ -258,7 +270,9 @@ class DockerMonitor {
       
       for (const id of removedIds) {
         const prevLabels = this.containerLabelsCache[id];
-        const hasDnsLabels = prevLabels && Object.keys(prevLabels).some(key => key.startsWith(dnsLabelPrefix));
+        const hasDnsLabels = prevLabels && Object.keys(prevLabels).some(key => 
+          key.startsWith(genericPrefix) || key.startsWith(providerPrefix)
+        );
         
         if (hasDnsLabels) {
           // Use the container name if we had it before
@@ -282,7 +296,9 @@ class DockerMonitor {
       
       for (const name of removedNames) {
         const prevLabels = this.containerLabelsCache[name];
-        const hasDnsLabels = prevLabels && Object.keys(prevLabels).some(key => key.startsWith(dnsLabelPrefix));
+        const hasDnsLabels = prevLabels && Object.keys(prevLabels).some(key => 
+          key.startsWith(genericPrefix) || key.startsWith(providerPrefix)
+        );
         
         if (hasDnsLabels) {
           logger.info(`Container ${name} with DNS labels was removed`);

@@ -27,6 +27,30 @@ function isApexDomain(hostname, zone) {
 }
 
 /**
+ * Get label value with provider-specific precedence
+ * @param {Object} labels - Container labels
+ * @param {string} genericPrefix - Generic label prefix 
+ * @param {string} providerPrefix - Provider-specific label prefix
+ * @param {string} key - Label key (without prefix)
+ * @param {*} defaultValue - Default value if label not found
+ * @returns {*} - Label value
+ */
+function getLabelValue(labels, genericPrefix, providerPrefix, key, defaultValue) {
+  // First check provider-specific label
+  if (labels[`${providerPrefix}${key}`] !== undefined) {
+    return labels[`${providerPrefix}${key}`];
+  }
+  
+  // Then check generic label
+  if (labels[`${genericPrefix}${key}`] !== undefined) {
+    return labels[`${genericPrefix}${key}`];
+  }
+  
+  // Return default if no label found
+  return defaultValue;
+}
+
+/**
  * Extract DNS configuration from container labels
  */
 function extractDnsConfigFromLabels(labels, config, hostname) {
@@ -36,25 +60,23 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   if (logger.level >= LOG_LEVELS.TRACE) {
     // In TRACE mode, log all DNS-related labels
     const dnsLabels = Object.entries(labels)
-      .filter(([key]) => key.startsWith(config.dnsLabelPrefix))
+      .filter(([key]) => key.startsWith(config.genericLabelPrefix) || key.startsWith(config.dnsLabelPrefix))
       .map(([key, value]) => `${key}=${value}`);
       
     logger.trace(`dns.extractDnsConfigFromLabels: DNS-related labels: ${dnsLabels.length ? dnsLabels.join(', ') : 'none'}`);
   }
   
-  const prefix = config.dnsLabelPrefix;
+  const genericPrefix = config.genericLabelPrefix;
+  const providerPrefix = config.dnsLabelPrefix;
   
   // Check if this is an apex domain
   const isApex = isApexDomain(hostname, config.cloudflareZone);
   
   // Determine record type - first from specific labels, then from default
-  let recordType = labels[`${prefix}type`];
-  if (!recordType) {
-    recordType = isApex ? 'A' : config.defaultRecordType;
-    logger.trace(`dns.extractDnsConfigFromLabels: Using default record type: ${recordType}`);
-  } else {
-    logger.trace(`dns.extractDnsConfigFromLabels: Using label-specified record type: ${recordType}`);
-  }
+  const recordTypeLabel = getLabelValue(labels, genericPrefix, providerPrefix, 'type', null);
+  let recordType = recordTypeLabel || (isApex ? 'A' : config.defaultRecordType);
+  
+  logger.trace(`dns.extractDnsConfigFromLabels: Using record type: ${recordType} (from ${recordTypeLabel ? 'label' : 'default'})`);
   
   // Get defaults for this record type
   const defaults = config.getDefaultsForType(recordType);
@@ -64,11 +86,11 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   const recordConfig = {
     type: recordType,
     name: hostname,
-    ttl: parseInt(labels[`${prefix}ttl`] || defaults.ttl, 10)
+    ttl: parseInt(getLabelValue(labels, genericPrefix, providerPrefix, 'ttl', defaults.ttl), 10)
   };
   
   // Handle content based on record type and apex status
-  let content = labels[`${prefix}content`];
+  let content = getLabelValue(labels, genericPrefix, providerPrefix, 'content', null);
   
   // If content isn't specified in labels
   if (!content) {
@@ -101,7 +123,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   
   // Handle proxied status
   if (['A', 'AAAA', 'CNAME'].includes(recordConfig.type)) {
-    const proxiedLabel = labels[`${prefix}proxied`];
+    const proxiedLabel = getLabelValue(labels, genericPrefix, providerPrefix, 'proxied', null);
     logger.debug(`Processing proxied status for ${hostname}: Label value = ${proxiedLabel}`);
     
     // Create a simple cache to track if we've already logged this hostname's proxied status
@@ -111,7 +133,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
     
     const previousValue = global.proxiedStatusCache[hostname];
     
-    if (proxiedLabel !== undefined) {
+    if (proxiedLabel !== null) {
       // Explicitly check against string 'false' to ensure proper conversion to boolean
       // This is a critical conversion point - must be clear and reliable
       if (proxiedLabel === 'false') {
@@ -159,7 +181,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   switch (recordConfig.type) {
     case 'MX':
       recordConfig.priority = parseInt(
-        labels[`${prefix}priority`] || defaults.priority, 
+        getLabelValue(labels, genericPrefix, providerPrefix, 'priority', defaults.priority), 
         10
       );
       logger.trace(`dns.extractDnsConfigFromLabels: MX priority set to ${recordConfig.priority}`);
@@ -167,15 +189,15 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
       
     case 'SRV':
       recordConfig.priority = parseInt(
-        labels[`${prefix}priority`] || defaults.priority, 
+        getLabelValue(labels, genericPrefix, providerPrefix, 'priority', defaults.priority), 
         10
       );
       recordConfig.weight = parseInt(
-        labels[`${prefix}weight`] || defaults.weight, 
+        getLabelValue(labels, genericPrefix, providerPrefix, 'weight', defaults.weight), 
         10
       );
       recordConfig.port = parseInt(
-        labels[`${prefix}port`] || defaults.port, 
+        getLabelValue(labels, genericPrefix, providerPrefix, 'port', defaults.port), 
         10
       );
       logger.trace(`dns.extractDnsConfigFromLabels: SRV fields - priority: ${recordConfig.priority}, weight: ${recordConfig.weight}, port: ${recordConfig.port}`);
@@ -183,10 +205,10 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
       
     case 'CAA':
       recordConfig.flags = parseInt(
-        labels[`${prefix}flags`] || defaults.flags, 
+        getLabelValue(labels, genericPrefix, providerPrefix, 'flags', defaults.flags), 
         10
       );
-      recordConfig.tag = labels[`${prefix}tag`] || defaults.tag;
+      recordConfig.tag = getLabelValue(labels, genericPrefix, providerPrefix, 'tag', defaults.tag);
       logger.trace(`dns.extractDnsConfigFromLabels: CAA fields - flags: ${recordConfig.flags}, tag: ${recordConfig.tag}`);
       break;
   }
@@ -197,5 +219,6 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
 
 module.exports = {
   isApexDomain,
-  extractDnsConfigFromLabels
+  extractDnsConfigFromLabels,
+  getLabelValue
 };

@@ -13,6 +13,7 @@ A service that automatically manages Cloudflare DNS records based on Traefik rou
 - 🧹 Optional cleanup of orphaned DNS records
 - 📊 Optimised performance with DNS caching and batch processing
 - 🖨️ Configurable logging levels for better troubleshooting
+- 🔌 Provider-agnostic label system for future extensibility
 
 ## Quick Start
 
@@ -42,26 +43,46 @@ services:
 
 The DNS Manager supports the following labels for customizing DNS record creation:
 
-### Basic Labels
+### Basic Labels (Provider-Agnostic)
 
 | Label | Description | Default |
 |-------|-------------|---------|
-| `dns.cloudflare.skip` | Skip DNS management for this service | `false` |
-| `dns.cloudflare.manage` | Enable DNS management for this service | Depends on `DNS_DEFAULT_MANAGE` |
-| `dns.cloudflare.type` | DNS record type (A, AAAA, CNAME, etc.) | `CNAME` or `A` for apex domains |
-| `dns.cloudflare.content` | Record content/value | Domain for CNAME, Public IP for A |
+| `dns.skip` | Skip DNS management for this service | `false` |
+| `dns.manage` | Enable DNS management for this service | Depends on `DNS_DEFAULT_MANAGE` |
+| `dns.type` | DNS record type (A, AAAA, CNAME, etc.) | `CNAME` or `A` for apex domains |
+| `dns.content` | Record content/value | Domain for CNAME, Public IP for A |
+| `dns.ttl` | Record TTL in seconds | `1` (Auto) |
+
+### Provider-Specific Labels (Override Provider-Agnostic Labels)
+
+| Label | Description | Default |
+|-------|-------------|---------|
+| `dns.cloudflare.skip` | Skip Cloudflare DNS management for this service | `false` |
+| `dns.cloudflare.manage` | Enable Cloudflare DNS management for this service | Depends on `DNS_DEFAULT_MANAGE` |
+| `dns.cloudflare.type` | DNS record type for Cloudflare | `CNAME` or `A` for apex domains |
+| `dns.cloudflare.content` | Record content for Cloudflare | Domain for CNAME, Public IP for A |
 | `dns.cloudflare.proxied` | Enable Cloudflare proxy (orange cloud) | `true` |
-| `dns.cloudflare.ttl` | Record TTL in seconds | `1` (Auto) |
+| `dns.cloudflare.ttl` | Record TTL for Cloudflare in seconds | `1` (Auto) |
 
 ### Type-Specific Labels
 
 | Label | Applicable Types | Description |
 |-------|------------------|-------------|
-| `dns.cloudflare.priority` | MX, SRV | Priority value |
-| `dns.cloudflare.weight` | SRV | Weight value |
-| `dns.cloudflare.port` | SRV | Port value |
-| `dns.cloudflare.flags` | CAA | Flags value |
-| `dns.cloudflare.tag` | CAA | Tag value |
+| `dns.priority` or `dns.cloudflare.priority` | MX, SRV | Priority value |
+| `dns.weight` or `dns.cloudflare.weight` | SRV | Weight value |
+| `dns.port` or `dns.cloudflare.port` | SRV | Port value |
+| `dns.flags` or `dns.cloudflare.flags` | CAA | Flags value |
+| `dns.tag` or `dns.cloudflare.tag` | CAA | Tag value |
+
+## Label Precedence
+
+The system uses the following precedence order when reading labels:
+
+1. Provider-specific labels (e.g., `dns.cloudflare.type`)
+2. Generic DNS labels (e.g., `dns.type`)
+3. Default values from configuration
+
+This allows you to set global defaults, override them with generic DNS settings, and further override with provider-specific settings when needed.
 
 ## Usage Examples
 
@@ -90,7 +111,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.my-service.rule=Host(`service.example.com`)"
-      - "dns.cloudflare.proxied=false"  # Disable Cloudflare proxy
+      - "dns.proxied=false"  # Use generic label
+      # OR "dns.cloudflare.proxied=false"  # Use provider-specific label
 ```
 
 ### Use A Record with Custom IP
@@ -102,8 +124,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.my-app.rule=Host(`app.example.com`)"
-      - "dns.cloudflare.type=A"
-      - "dns.cloudflare.content=203.0.113.10"  # Custom IP address
+      - "dns.type=A"
+      - "dns.content=203.0.113.10"  # Custom IP address
 ```
 
 ### Skip DNS Management for a Service
@@ -115,7 +137,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.internal.rule=Host(`internal.example.com`)"
-      - "dns.cloudflare.skip=true"  # Skip DNS management for this service
+      - "dns.skip=true"  # Skip DNS management for all providers
+      # OR "dns.cloudflare.skip=true"  # Skip just Cloudflare DNS management
 ```
 
 ### Opt-in DNS Management (when DNS_DEFAULT_MANAGE=false)
@@ -127,7 +150,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.public.rule=Host(`public.example.com`)"
-      - "dns.cloudflare.manage=true"  # Explicitly enable DNS management
+      - "dns.manage=true"  # Explicitly enable DNS management for all providers
+      # OR "dns.cloudflare.manage=true"  # Enable just for Cloudflare
 ```
 
 ### Create MX Record
@@ -139,9 +163,9 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.mail.rule=Host(`example.com`)"
-      - "dns.cloudflare.type=MX"
-      - "dns.cloudflare.content=mail.example.com"
-      - "dns.cloudflare.priority=10"
+      - "dns.type=MX"
+      - "dns.content=mail.example.com"
+      - "dns.priority=10"
 ```
 
 ## Environment Variables
@@ -162,6 +186,8 @@ services:
 ### DNS Default Settings
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
+| `DNS_PROVIDER` | DNS provider to use | `cloudflare` | No |
+| `DNS_LABEL_PREFIX` | Base prefix for DNS labels | `dns.` | No |
 | `DNS_DEFAULT_TYPE` | Default DNS record type | `CNAME` | No |
 | `DNS_DEFAULT_CONTENT` | Default record content | Value of `CLOUDFLARE_ZONE` | No |
 | `DNS_DEFAULT_PROXIED` | Default Cloudflare proxy status | `true` | No |
@@ -192,12 +218,12 @@ Traefik DNS Manager supports two operational modes for DNS management:
 ### Opt-out Mode (Default)
 - Set `DNS_DEFAULT_MANAGE=true` or leave it unset
 - All services automatically get DNS records created
-- Services can opt-out with `dns.cloudflare.skip=true` label
+- Services can opt-out with `dns.skip=true` or `dns.cloudflare.skip=true` label
 
 ### Opt-in Mode
 - Set `DNS_DEFAULT_MANAGE=false`
-- Services need to explicitly opt-in with `dns.cloudflare.manage=true` label
-- Services can still use `dns.cloudflare.skip=true` to ensure no DNS management
+- Services need to explicitly opt-in with `dns.manage=true` or `dns.cloudflare.manage=true` label
+- Services can still use skip labels to ensure no DNS management
 
 ## Logging System
 
@@ -214,8 +240,6 @@ The application includes a configurable logging system to help with monitoring a
 The default level is `INFO`, which provides a clean, readable output with important operational information. Set the `LOG_LEVEL` environment variable to change the logging verbosity.
 
 ### INFO Level Format
-
-The INFO level uses special formatting with emojis for better readability:
 
 ```
 ✅ Starting Traefik DNS Manager
