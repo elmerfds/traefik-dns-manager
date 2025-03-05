@@ -126,6 +126,24 @@ function validateRecord(record) {
     logger.trace(`digitalocean.validator: Adjusting TTL from ${record.ttl} to 30 (minimum)`);
     record.ttl = 30;
   }
+
+  // Add in validateRecord function for CNAME type
+  if (record.type === 'CNAME') {
+    // Check if this is an apex domain pointing to itself
+    if (record.name === record.content || 
+        record.name === `${record.content}.` ||
+        `${record.name}.` === record.content) {
+      logger.warn(`Cannot create CNAME record for ${record.name} pointing to itself. Converting to A record.`);
+      // Convert to A record
+      record.type = 'A';
+      // Get public IP if content is the same as domain
+      if (!record.content || record.content === record.name || 
+          record.content === `${record.name}.` || `${record.content}.` === record.name) {
+        record.content = config.getPublicIPSync() || '';
+        logger.debug(`Using public IP for apex domain A record: ${record.content}`);
+      }
+    }
+  }  
   
   logger.trace(`digitalocean.validator: Record validation successful`);
 }
