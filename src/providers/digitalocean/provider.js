@@ -31,14 +31,14 @@ class DigitalOceanProvider extends DNSProvider {
   }
   
   /**
-   * Initialize API
+   * Initialize API by verifying domain exists
    */
   async init() {
     logger.trace(`DigitalOceanProvider.init: Starting initialization for domain "${this.domain}"`);
     
     try {
-      // Verify domain exists in DigitalOcean
-      logger.trace('DigitalOceanProvider.init: Verifying domain in DigitalOcean');
+      // Verify the domain exists
+      logger.trace('DigitalOceanProvider.init: Verifying domain exists in DigitalOcean');
       await this.client.get(`/domains/${this.domain}`);
       
       logger.debug(`DigitalOcean domain verified: ${this.domain}`);
@@ -50,15 +50,17 @@ class DigitalOceanProvider extends DNSProvider {
       
       return true;
     } catch (error) {
-      if (error.response && error.response.status === 404) {
+      const statusCode = error.response?.status;
+      
+      if (statusCode === 404) {
         logger.error(`Domain not found in DigitalOcean: ${this.domain}`);
         throw new Error(`Domain not found in DigitalOcean: ${this.domain}`);
+      } else if (statusCode === 401) {
+        logger.error('Invalid DigitalOcean API token');
+        throw new Error('Invalid DigitalOcean API token. Please check your DIGITALOCEAN_TOKEN environment variable.');
       }
       
       logger.error(`Failed to initialize DigitalOcean API: ${error.message}`);
-      if (error.response && error.response.data) {
-        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-      }
       logger.trace(`DigitalOceanProvider.init: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw new Error(`Failed to initialize DigitalOcean API: ${error.message}`);
     }
@@ -73,43 +75,19 @@ class DigitalOceanProvider extends DNSProvider {
     try {
       logger.debug('Refreshing DNS record cache from DigitalOcean');
       
-      // Get all records for the domain in one API call
+      // Get all records for the domain
       logger.trace(`DigitalOceanProvider.refreshRecordCache: Fetching records for domain ${this.domain}`);
       
-      const response = await this.client.get(`/domains/${this.domain}/records?per_page=100`);
-      
+      const records = await this.fetchAllRecords();
       const oldRecordCount = this.recordCache.records.length;
       
       this.recordCache = {
-        records: response.data.domain_records,
+        records: records,
         lastUpdated: Date.now()
       };
       
       logger.debug(`Cached ${this.recordCache.records.length} DNS records from DigitalOcean`);
       logger.trace(`DigitalOceanProvider.refreshRecordCache: Cache updated from ${oldRecordCount} to ${this.recordCache.records.length} records`);
-      
-      // If there are more records (pagination), fetch them as well
-      let nextPage = 2;
-      let totalPages = Math.ceil(response.data.meta.total / 100);
-      
-      while (nextPage <= totalPages) {
-        logger.debug(`Fetching additional DNS records page from DigitalOcean (page ${nextPage})`);
-        logger.trace(`DigitalOceanProvider.refreshRecordCache: Fetching page ${nextPage}`);
-        
-        const pageResponse = await this.client.get(`/domains/${this.domain}/records?per_page=100&page=${nextPage}`);
-        
-        const newRecords = pageResponse.data.domain_records;
-        logger.trace(`DigitalOceanProvider.refreshRecordCache: Received ${newRecords.length} additional records from page ${nextPage}`);
-        
-        this.recordCache.records = [
-          ...this.recordCache.records,
-          ...newRecords
-        ];
-        
-        nextPage++;
-      }
-      
-      logger.debug(`DNS record cache now contains ${this.recordCache.records.length} records`);
       
       // In TRACE mode, output the entire cache for debugging
       if (logger.level >= 4) { // TRACE level
@@ -122,12 +100,44 @@ class DigitalOceanProvider extends DNSProvider {
       return this.recordCache.records;
     } catch (error) {
       logger.error(`Failed to refresh DNS record cache: ${error.message}`);
-      if (error.response && error.response.data) {
-        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-      }
       logger.trace(`DigitalOceanProvider.refreshRecordCache: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
+  }
+  
+  /**
+   * Fetch all records, handling pagination
+   */
+  async fetchAllRecords() {
+    let allRecords = [];
+    let nextPage = 1;
+    let hasMorePages = true;
+    
+    while (hasMorePages) {
+      try {
+        const response = await this.client.get(`/domains/${this.domain}/records`, {
+          params: { page: nextPage, per_page: 100 }
+        });
+        
+        const records = response.data.domain_records || [];
+        allRecords = allRecords.concat(records);
+        
+        // Check if there are more pages
+        const links = response.data.links;
+        const hasNextPage = links && links.pages && links.pages.next;
+        
+        if (hasNextPage) {
+          nextPage++;
+        } else {
+          hasMorePages = false;
+        }
+      } catch (error) {
+        logger.error(`Error fetching page ${nextPage} of DNS records: ${error.message}`);
+        hasMorePages = false;
+      }
+    }
+    
+    return allRecords;
   }
   
   /**
@@ -171,6 +181,42 @@ class DigitalOceanProvider extends DNSProvider {
     logger.trace(`DigitalOceanProvider.listRecords: Listing records with params: ${JSON.stringify(params)}`);
     
     try {
+      // If specific filters are used other than type and name, bypass cache
+      const bypassCache = Object.keys(params).some(
+        key => !['type', 'name'].includes(key)
+      );
+      
+      if (bypassCache) {
+        logger.debug('Bypassing cache due to complex filters');
+        logger.trace(`DigitalOceanProvider.listRecords: Bypassing cache due to filters: ${JSON.stringify(params)}`);
+        
+        const records = await this.fetchAllRecords();
+        
+        // Apply filters manually since DO API has limited filtering
+        const filteredRecords = records.filter(record => {
+          let match = true;
+          
+          if (params.type && record.type !== params.type) {
+            match = false;
+          }
+          
+          if (params.name) {
+            // Handle the @ symbol for apex domain
+            const recordName = record.name === '@' ? this.domain : `${record.name}.${this.domain}`;
+            if (recordName !== params.name) {
+              match = false;
+            }
+          }
+          
+          return match;
+        });
+        
+        logger.trace(`DigitalOceanProvider.listRecords: API filtering returned ${filteredRecords.length} records`);
+        return filteredRecords;
+      }
+      
+      // Use cache for simple type/name filtering
+      logger.trace('DigitalOceanProvider.listRecords: Using cache with filters');
       const records = await this.getRecordsFromCache();
       
       // Apply filters
@@ -182,9 +228,9 @@ class DigitalOceanProvider extends DNSProvider {
         }
         
         if (params.name) {
-          // DigitalOcean stores names without the domain, so we need to handle matching differently
-          const fullName = record.name === '@' ? this.domain : `${record.name}.${this.domain}`;
-          if (fullName !== params.name) {
+          // Handle the @ symbol for apex domain
+          const recordName = record.name === '@' ? this.domain : `${record.name}.${this.domain}`;
+          if (recordName !== params.name) {
             match = false;
           }
         }
@@ -192,17 +238,39 @@ class DigitalOceanProvider extends DNSProvider {
         return match;
       });
       
-      logger.trace(`DigitalOceanProvider.listRecords: Filtered to ${filteredRecords.length} records`);
+      logger.trace(`DigitalOceanProvider.listRecords: Cache filtering returned ${filteredRecords.length} records`);
       
       return filteredRecords;
     } catch (error) {
       logger.error(`Failed to list DNS records: ${error.message}`);
-      if (error.response && error.response.data) {
-        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-      }
       logger.trace(`DigitalOceanProvider.listRecords: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
+  }
+  
+  /**
+   * Find a record in the cache
+   * Override the base method to handle DigitalOcean's @ symbol for apex domains
+   */
+  findRecordInCache(type, name) {
+    // First normalize the name to handle apex domain scenarios
+    const domainPart = `.${this.domain}`;
+    
+    // If the name ends with the domain, extract the subdomain part
+    let recordName = name;
+    if (name.endsWith(domainPart)) {
+      recordName = name.slice(0, -domainPart.length);
+      // If the name is exactly the domain, use @ for the apex
+      if (recordName === '') {
+        recordName = '@';
+      }
+    }
+    
+    logger.trace(`DigitalOceanProvider.findRecordInCache: Looking for ${type} record with name ${recordName}`);
+    
+    return this.recordCache.records.find(
+      record => record.type === type && record.name === recordName
+    );
   }
   
   /**
@@ -215,11 +283,13 @@ class DigitalOceanProvider extends DNSProvider {
       // Validate the record first
       validateRecord(record);
       
+      // Convert name format for DO - extract subdomain part
+      const recordData = this.prepareRecordForCreation(record);
+      
       // Convert to DigitalOcean format
-      const doRecord = convertToDigitalOceanFormat(record, this.domain);
+      const doRecord = convertToDigitalOceanFormat(recordData);
       
       logger.trace(`DigitalOceanProvider.createRecord: Sending create request to DigitalOcean API: ${JSON.stringify(doRecord)}`);
-      logger.debug(`Creating ${record.type} record in DigitalOcean: ${JSON.stringify(doRecord)}`);
       
       const response = await this.client.post(
         `/domains/${this.domain}/records`,
@@ -245,12 +315,30 @@ class DigitalOceanProvider extends DNSProvider {
       return createdRecord;
     } catch (error) {
       logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
-      if (error.response && error.response.data) {
-        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-      }
       logger.trace(`DigitalOceanProvider.createRecord: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
+  }
+  
+  /**
+   * Prepare record for creation by formatting it for DigitalOcean
+   */
+  prepareRecordForCreation(record) {
+    // Make a copy of the record to avoid modifying the original
+    const recordData = { ...record };
+    
+    // Handle the name format for DigitalOcean
+    // DigitalOcean expects just the subdomain part, not the full domain
+    const domainPart = `.${this.domain}`;
+    if (recordData.name.endsWith(domainPart)) {
+      recordData.name = recordData.name.slice(0, -domainPart.length);
+      // If the name is exactly the domain, use @ for the apex
+      if (recordData.name === '') {
+        recordData.name = '@';
+      }
+    }
+    
+    return recordData;
   }
   
   /**
@@ -263,11 +351,13 @@ class DigitalOceanProvider extends DNSProvider {
       // Validate the record first
       validateRecord(record);
       
+      // Convert name format for DO - extract subdomain part
+      const recordData = this.prepareRecordForCreation(record);
+      
       // Convert to DigitalOcean format
-      const doRecord = convertToDigitalOceanFormat(record, this.domain);
+      const doRecord = convertToDigitalOceanFormat(recordData);
       
       logger.trace(`DigitalOceanProvider.updateRecord: Sending update request to DigitalOcean API: ${JSON.stringify(doRecord)}`);
-      logger.debug(`Updating ${record.type} record in DigitalOcean: ${JSON.stringify(doRecord)}`);
       
       const response = await this.client.put(
         `/domains/${this.domain}/records/${id}`,
@@ -293,9 +383,6 @@ class DigitalOceanProvider extends DNSProvider {
       return updatedRecord;
     } catch (error) {
       logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
-      if (error.response && error.response.data) {
-        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-      }
       logger.trace(`DigitalOceanProvider.updateRecord: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
@@ -311,8 +398,11 @@ class DigitalOceanProvider extends DNSProvider {
       // Find the record in cache before deleting to log info
       const recordToDelete = this.recordCache.records.find(r => r.id === id);
       if (recordToDelete) {
-        const name = recordToDelete.name === '@' ? this.domain : `${recordToDelete.name}.${this.domain}`;
-        logger.info(`🗑️ Deleting DNS record: ${name} (${recordToDelete.type})`);
+        // Format the name to display the full domain
+        const displayName = recordToDelete.name === '@' 
+          ? this.domain 
+          : `${recordToDelete.name}.${this.domain}`;
+        logger.info(`🗑️ Deleting DNS record: ${displayName} (${recordToDelete.type})`);
       }
       
       logger.trace(`DigitalOceanProvider.deleteRecord: Sending delete request to DigitalOcean API`);
@@ -327,9 +417,6 @@ class DigitalOceanProvider extends DNSProvider {
       return true;
     } catch (error) {
       logger.error(`Failed to delete DNS record with ID ${id}: ${error.message}`);
-      if (error.response && error.response.data) {
-        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-      }
       logger.trace(`DigitalOceanProvider.deleteRecord: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
@@ -388,9 +475,7 @@ class DigitalOceanProvider extends DNSProvider {
           validateRecord(recordConfig);
           
           // Find existing record in cache
-          // DigitalOcean uses different name conventions, so we need custom matching
-          const recordName = this.getRecordNameForDO(recordConfig.name);
-          const existing = this.findRecordInCacheByName(recordConfig.type, recordName);
+          const existing = this.findRecordInCache(recordConfig.type, recordConfig.name);
           
           if (existing) {
             logger.trace(`DigitalOceanProvider.batchEnsureRecords: Found existing record ID=${existing.id}`);
@@ -450,9 +535,6 @@ class DigitalOceanProvider extends DNSProvider {
           results.push(result);
         } catch (error) {
           logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
-          if (error.response && error.response.data) {
-            logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-          }
           logger.trace(`DigitalOceanProvider.batchEnsureRecords: Create error: ${error.message}`);
           
           if (global.statsCounter) {
@@ -471,9 +553,6 @@ class DigitalOceanProvider extends DNSProvider {
           results.push(result);
         } catch (error) {
           logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
-          if (error.response && error.response.data) {
-            logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-          }
           logger.trace(`DigitalOceanProvider.batchEnsureRecords: Update error: ${error.message}`);
           
           if (global.statsCounter) {
@@ -491,38 +570,11 @@ class DigitalOceanProvider extends DNSProvider {
       return results;
     } catch (error) {
       logger.error(`Failed to batch process DNS records: ${error.message}`);
-      if (error.response && error.response.data) {
-        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
-      }
       logger.trace(`DigitalOceanProvider.batchEnsureRecords: Error details: ${error.message}`);
       throw error;
     }
   }
   
-  /**
-   * Get record name for DigitalOcean (strip domain suffix)
-   */
-  getRecordNameForDO(fqdn) {
-    if (fqdn === this.domain) {
-      return '@';
-    }
-    
-    if (fqdn.endsWith(`.${this.domain}`)) {
-      return fqdn.slice(0, -this.domain.length - 1);
-    }
-    
-    return fqdn;
-  }
-  
-  /**
-   * Find a record in the cache by name (DigitalOcean specific)
-   */
-  findRecordInCacheByName(type, name) {
-    return this.recordCache.records.find(
-      record => record.type === type && record.name === name
-    );
-  }
-
   /**
    * Check if a record needs to be updated
    */
@@ -531,47 +583,56 @@ class DigitalOceanProvider extends DNSProvider {
     logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Existing: ${JSON.stringify(existing)}`);
     logger.trace(`DigitalOceanProvider.recordNeedsUpdate: New: ${JSON.stringify(newRecord)}`);
     
-    // Extract name from FQDN for new record
-    const newName = this.getRecordNameForDO(newRecord.name);
-    
-    // Map our internal content field to DO's data field
-    let doContent = newRecord.content || '';
-    
-    // For CNAME records, make sure it ends with a dot
-    if (newRecord.type === 'CNAME' && doContent && !doContent.endsWith('.')) {
-      doContent = doContent + '.';
-    }
-    
-    // Basic field comparison
-    let needsUpdate = existing.data !== doContent;
-    
-    // If TTL is specified, compare it
-    if (newRecord.ttl !== undefined) {
-      needsUpdate = needsUpdate || (existing.ttl !== newRecord.ttl);
-    }
-    
-    // If priority is specified for MX or SRV, compare it
-    if (newRecord.priority !== undefined && ['MX', 'SRV'].includes(newRecord.type)) {
-      needsUpdate = needsUpdate || (existing.priority !== newRecord.priority);
-    }
-    
-    // Type-specific comparisons
-    switch (newRecord.type) {
+    // Extract the correct content field based on record type
+    let existingContent;
+    switch (existing.type) {
+      case 'MX':
       case 'SRV':
-        if (newRecord.weight !== undefined) {
-          needsUpdate = needsUpdate || (existing.weight !== newRecord.weight);
+      case 'CAA':
+        existingContent = existing.data;
+        break;
+      default:
+        existingContent = existing.data;
+    }
+    
+    // Compare basic fields
+    let needsUpdate = false;
+    
+    // Compare content/data
+    if (existingContent !== newRecord.content) {
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Content different: ${existingContent} vs ${newRecord.content}`);
+      needsUpdate = true;
+    }
+    
+    // Compare TTL
+    if (existing.ttl !== newRecord.ttl) {
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: TTL different: ${existing.ttl} vs ${newRecord.ttl}`);
+      needsUpdate = true;
+    }
+    
+    // Type-specific field comparisons
+    switch (newRecord.type) {
+      case 'MX':
+        if (existing.priority !== newRecord.priority) {
+          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: MX priority different: ${existing.priority} vs ${newRecord.priority}`);
+          needsUpdate = true;
         }
-        if (newRecord.port !== undefined) {
-          needsUpdate = needsUpdate || (existing.port !== newRecord.port);
+        break;
+        
+      case 'SRV':
+        if (existing.priority !== newRecord.priority ||
+            existing.weight !== newRecord.weight ||
+            existing.port !== newRecord.port) {
+          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: SRV fields different`);
+          needsUpdate = true;
         }
         break;
         
       case 'CAA':
-        if (newRecord.flags !== undefined) {
-          needsUpdate = needsUpdate || (existing.flags !== newRecord.flags);
-        }
-        if (newRecord.tag !== undefined) {
-          needsUpdate = needsUpdate || (existing.tag !== newRecord.tag);
+        if (existing.flags !== newRecord.flags ||
+            existing.tag !== newRecord.tag) {
+          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: CAA fields different`);
+          needsUpdate = true;
         }
         break;
     }
@@ -579,12 +640,34 @@ class DigitalOceanProvider extends DNSProvider {
     // If an update is needed, log the specific differences at DEBUG level
     if (needsUpdate && logger.level >= 3) { // DEBUG level or higher
       logger.debug(`Record ${newRecord.name} needs update:`);
-      if (existing.data !== doContent) 
-        logger.debug(` - Content: ${existing.data} → ${doContent}`);
-      if (newRecord.ttl !== undefined && existing.ttl !== newRecord.ttl) 
+      if (existingContent !== newRecord.content) 
+        logger.debug(` - Content: ${existingContent} → ${newRecord.content}`);
+      if (existing.ttl !== newRecord.ttl) 
         logger.debug(` - TTL: ${existing.ttl} → ${newRecord.ttl}`);
-      if (newRecord.priority !== undefined && existing.priority !== newRecord.priority) 
-        logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
+      
+      // Log type-specific field changes
+      switch (newRecord.type) {
+        case 'MX':
+          if (existing.priority !== newRecord.priority)
+            logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
+          break;
+          
+        case 'SRV':
+          if (existing.priority !== newRecord.priority)
+            logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
+          if (existing.weight !== newRecord.weight)
+            logger.debug(` - Weight: ${existing.weight} → ${newRecord.weight}`);
+          if (existing.port !== newRecord.port)
+            logger.debug(` - Port: ${existing.port} → ${newRecord.port}`);
+          break;
+          
+        case 'CAA':
+          if (existing.flags !== newRecord.flags)
+            logger.debug(` - Flags: ${existing.flags} → ${newRecord.flags}`);
+          if (existing.tag !== newRecord.tag)
+            logger.debug(` - Tag: ${existing.tag} → ${newRecord.tag}`);
+          break;
+      }
     }
     
     logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Final result - needs update: ${needsUpdate}`);

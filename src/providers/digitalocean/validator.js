@@ -45,19 +45,6 @@ function validateRecord(record) {
       break;
       
     case 'CNAME':
-      if (!record.content) {
-        logger.trace(`digitalocean.validator: Content is missing for CNAME record`);
-        throw new Error('Content is required for CNAME records');
-      }
-      
-      // DigitalOcean has specific requirements for CNAME records
-      // Ensure the content is a valid domain or a domain with trailing dot
-      // For now, just warn if it's obviously not a domain - rely on converter to add trailing dot
-      if (record.content.includes(' ') || record.content.includes(',')) {
-        logger.warn(`CNAME content for ${record.name} appears to be invalid: ${record.content}`);
-      }
-      break;
-      
     case 'TXT':
     case 'NS':
       if (!record.content) {
@@ -120,30 +107,18 @@ function validateRecord(record) {
   
   // DigitalOcean-specific validations
   
-  // TTL validations
+  // Remove 'proxied' property if present (DigitalOcean doesn't support proxying)
+  if (record.proxied !== undefined) {
+    logger.warn(`'proxied' setting is being ignored for DigitalOcean records. DigitalOcean does not support proxying.`);
+    delete record.proxied;
+  }
+  
+  // DigitalOcean requires TTL to be at least 30 seconds
   if (record.ttl !== undefined && record.ttl < 30) {
-    logger.warn(`TTL value ${record.ttl} is too low for record ${record.name} (${record.type}). DigitalOcean requires minimum 30 seconds. Setting to 30 seconds.`);
+    logger.warn(`TTL value ${record.ttl} is too low for DigitalOcean DNS. Setting to 30 seconds (minimum).`);
     logger.trace(`digitalocean.validator: Adjusting TTL from ${record.ttl} to 30 (minimum)`);
     record.ttl = 30;
   }
-
-  // ValidateRecord function for CNAME type
-  if (record.type === 'CNAME') {
-    // Check if this is an apex domain pointing to itself
-    if (record.name === record.content || 
-        record.name === `${record.content}.` ||
-        `${record.name}.` === record.content) {
-      logger.warn(`Cannot create CNAME record for ${record.name} pointing to itself. Converting to A record.`);
-      // Convert to A record
-      record.type = 'A';
-      // Get public IP if content is the same as domain
-      if (!record.content || record.content === record.name || 
-          record.content === `${record.name}.` || `${record.content}.` === record.name) {
-        record.content = config.getPublicIPSync() || '';
-        logger.debug(`Using public IP for apex domain A record: ${record.content}`);
-      }
-    }
-  }  
   
   logger.trace(`digitalocean.validator: Record validation successful`);
 }
