@@ -83,11 +83,29 @@ class DNSManager {
           // Find container labels for this hostname if possible
           const labels = containerLabels[hostname] || {};
           
-          // Check if this service should skip DNS management
-          const skipDnsLabel = labels[`${this.config.dnsLabelPrefix}skip`];
-          if (skipDnsLabel === 'true') {
-            logger.debug(`Skipping DNS management for ${hostname} due to dns.cloudflare.skip=true label`);
-            continue; // Skip to the next hostname
+          // Check if we should manage DNS based on global setting and labels
+          const labelPrefix = this.config.dnsLabelPrefix;
+          const manageLabel = labels[`${labelPrefix}manage`];
+          const skipLabel = labels[`${labelPrefix}skip`];
+          
+          // Determine whether to manage this hostname's DNS
+          let shouldManage = this.config.defaultManage;
+          
+          // If global setting is false (opt-in), check for explicit manage=true
+          if (!shouldManage && manageLabel === 'true') {
+            shouldManage = true;
+            logger.debug(`Enabling DNS management for ${hostname} due to ${labelPrefix}manage=true label`);
+          }
+          
+          // Skip label always overrides (for backward compatibility)
+          if (skipLabel === 'true') {
+            shouldManage = false;
+            logger.debug(`Skipping DNS management for ${hostname} due to ${labelPrefix}skip=true label`);
+          }
+          
+          // Skip to next hostname if we shouldn't manage this one
+          if (!shouldManage) {
+            continue;
           }
           
           // Create fully qualified domain name
