@@ -22,11 +22,20 @@ function convertToDigitalOceanFormat(record, domain) {
     name = name.slice(0, -domain.length - 1);
   }
   
+  // Format the data/content value appropriately, based on record type
+  let data = record.content;
+  
+  // For CNAME records, make sure data ends with a dot
+  if (record.type === 'CNAME' && data && !data.endsWith('.')) {
+    data = data + '.';
+    logger.debug(`Ensuring CNAME content for ${record.name} ends with a dot: ${data}`);
+  }
+  
   // Basic record data
   const doRecord = {
     type: record.type,
     name: name,
-    data: record.content,
+    data: data,
   };
   
   // Add TTL if specified
@@ -75,12 +84,18 @@ function convertRecord(doRecord, domain) {
     name = `${name}.${domain}`;
   }
   
+  // Build content from data, removing trailing dot for CNAME if present
+  let content = doRecord.data;
+  if (doRecord.type === 'CNAME' && content && content.endsWith('.')) {
+    content = content.slice(0, -1);
+  }
+  
   // Basic record format
   const standardRecord = {
     id: doRecord.id,
     type: doRecord.type,
     name: name,
-    content: doRecord.data,
+    content: content,
   };
   
   // Add TTL if present

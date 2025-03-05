@@ -56,6 +56,9 @@ class DigitalOceanProvider extends DNSProvider {
       }
       
       logger.error(`Failed to initialize DigitalOcean API: ${error.message}`);
+      if (error.response && error.response.data) {
+        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+      }
       logger.trace(`DigitalOceanProvider.init: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw new Error(`Failed to initialize DigitalOcean API: ${error.message}`);
     }
@@ -119,6 +122,9 @@ class DigitalOceanProvider extends DNSProvider {
       return this.recordCache.records;
     } catch (error) {
       logger.error(`Failed to refresh DNS record cache: ${error.message}`);
+      if (error.response && error.response.data) {
+        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+      }
       logger.trace(`DigitalOceanProvider.refreshRecordCache: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
@@ -191,6 +197,9 @@ class DigitalOceanProvider extends DNSProvider {
       return filteredRecords;
     } catch (error) {
       logger.error(`Failed to list DNS records: ${error.message}`);
+      if (error.response && error.response.data) {
+        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+      }
       logger.trace(`DigitalOceanProvider.listRecords: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
@@ -210,6 +219,7 @@ class DigitalOceanProvider extends DNSProvider {
       const doRecord = convertToDigitalOceanFormat(record, this.domain);
       
       logger.trace(`DigitalOceanProvider.createRecord: Sending create request to DigitalOcean API: ${JSON.stringify(doRecord)}`);
+      logger.debug(`Creating ${record.type} record in DigitalOcean: ${JSON.stringify(doRecord)}`);
       
       const response = await this.client.post(
         `/domains/${this.domain}/records`,
@@ -235,6 +245,9 @@ class DigitalOceanProvider extends DNSProvider {
       return createdRecord;
     } catch (error) {
       logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
+      if (error.response && error.response.data) {
+        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+      }
       logger.trace(`DigitalOceanProvider.createRecord: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
@@ -254,6 +267,7 @@ class DigitalOceanProvider extends DNSProvider {
       const doRecord = convertToDigitalOceanFormat(record, this.domain);
       
       logger.trace(`DigitalOceanProvider.updateRecord: Sending update request to DigitalOcean API: ${JSON.stringify(doRecord)}`);
+      logger.debug(`Updating ${record.type} record in DigitalOcean: ${JSON.stringify(doRecord)}`);
       
       const response = await this.client.put(
         `/domains/${this.domain}/records/${id}`,
@@ -279,6 +293,9 @@ class DigitalOceanProvider extends DNSProvider {
       return updatedRecord;
     } catch (error) {
       logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
+      if (error.response && error.response.data) {
+        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+      }
       logger.trace(`DigitalOceanProvider.updateRecord: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
@@ -310,6 +327,9 @@ class DigitalOceanProvider extends DNSProvider {
       return true;
     } catch (error) {
       logger.error(`Failed to delete DNS record with ID ${id}: ${error.message}`);
+      if (error.response && error.response.data) {
+        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+      }
       logger.trace(`DigitalOceanProvider.deleteRecord: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
       throw error;
     }
@@ -430,6 +450,9 @@ class DigitalOceanProvider extends DNSProvider {
           results.push(result);
         } catch (error) {
           logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
+          if (error.response && error.response.data) {
+            logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+          }
           logger.trace(`DigitalOceanProvider.batchEnsureRecords: Create error: ${error.message}`);
           
           if (global.statsCounter) {
@@ -448,6 +471,9 @@ class DigitalOceanProvider extends DNSProvider {
           results.push(result);
         } catch (error) {
           logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
+          if (error.response && error.response.data) {
+            logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+          }
           logger.trace(`DigitalOceanProvider.batchEnsureRecords: Update error: ${error.message}`);
           
           if (global.statsCounter) {
@@ -465,6 +491,9 @@ class DigitalOceanProvider extends DNSProvider {
       return results;
     } catch (error) {
       logger.error(`Failed to batch process DNS records: ${error.message}`);
+      if (error.response && error.response.data) {
+        logger.debug(`DigitalOcean API error details: ${JSON.stringify(error.response.data)}`);
+      }
       logger.trace(`DigitalOceanProvider.batchEnsureRecords: Error details: ${error.message}`);
       throw error;
     }
@@ -506,7 +535,12 @@ class DigitalOceanProvider extends DNSProvider {
     const newName = this.getRecordNameForDO(newRecord.name);
     
     // Map our internal content field to DO's data field
-    const doContent = newRecord.content || '';
+    let doContent = newRecord.content || '';
+    
+    // For CNAME records, make sure it ends with a dot
+    if (newRecord.type === 'CNAME' && doContent && !doContent.endsWith('.')) {
+      doContent = doContent + '.';
+    }
     
     // Basic field comparison
     let needsUpdate = existing.data !== doContent;
