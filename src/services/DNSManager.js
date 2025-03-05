@@ -83,10 +83,25 @@ class DNSManager {
           // Find container labels for this hostname if possible
           const labels = containerLabels[hostname] || {};
           
+          // Get label prefixes for easier reference
+          const genericLabelPrefix = this.config.genericLabelPrefix;
+          const providerLabelPrefix = this.config.dnsLabelPrefix;
+          
           // Check if we should manage DNS based on global setting and labels
-          const labelPrefix = this.config.dnsLabelPrefix;
-          const manageLabel = labels[`${labelPrefix}manage`];
-          const skipLabel = labels[`${labelPrefix}skip`];
+          // First check generic labels
+          let manageLabel = labels[`${genericLabelPrefix}manage`];
+          let skipLabel = labels[`${genericLabelPrefix}skip`];
+          
+          // Then check provider-specific labels which take precedence
+          if (labels[`${providerLabelPrefix}manage`] !== undefined) {
+            manageLabel = labels[`${providerLabelPrefix}manage`];
+            logger.debug(`Found provider-specific manage label: ${providerLabelPrefix}manage=${manageLabel}`);
+          }
+          
+          if (labels[`${providerLabelPrefix}skip`] !== undefined) {
+            skipLabel = labels[`${providerLabelPrefix}skip`];
+            logger.debug(`Found provider-specific skip label: ${providerLabelPrefix}skip=${skipLabel}`);
+          }
           
           // Determine whether to manage this hostname's DNS
           let shouldManage = this.config.defaultManage;
@@ -94,13 +109,13 @@ class DNSManager {
           // If global setting is false (opt-in), check for explicit manage=true
           if (!shouldManage && manageLabel === 'true') {
             shouldManage = true;
-            logger.debug(`Enabling DNS management for ${hostname} due to ${labelPrefix}manage=true label`);
+            logger.debug(`Enabling DNS management for ${hostname} due to manage=true label`);
           }
           
           // Skip label always overrides (for backward compatibility)
           if (skipLabel === 'true') {
             shouldManage = false;
-            logger.debug(`Skipping DNS management for ${hostname} due to ${labelPrefix}skip=true label`);
+            logger.debug(`Skipping DNS management for ${hostname} due to skip=true label`);
           }
           
           // Skip to next hostname if we shouldn't manage this one
