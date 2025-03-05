@@ -24,6 +24,9 @@ async function start() {
     const traefikMonitor = new TraefikMonitor(config, eventBus);
     const dockerMonitor = new DockerMonitor(config, eventBus);
     
+    // Connect monitors for container name resolution
+    traefikMonitor.dockerMonitor = dockerMonitor;
+    
     // Display startup configuration
     await statusReporter.displaySettings();
     

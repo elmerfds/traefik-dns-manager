@@ -22,6 +22,9 @@ class DockerMonitor {
     // Global cache for container labels
     this.containerLabelsCache = {};
     
+    // Container ID to name mapping
+    this.containerIdToName = new Map();
+    
     // Event stream reference
     this.events = null;
   }
@@ -115,6 +118,7 @@ class DockerMonitor {
             // Publish labels updated event
             this.eventBus.publish(EventTypes.DOCKER_LABELS_UPDATED, {
               containerLabelsCache: this.containerLabelsCache,
+              containerIdToName: this.containerIdToName,
               triggerContainer: containerName
             });
           }, 3000);
@@ -144,9 +148,11 @@ class DockerMonitor {
       const newCache = {};
       const dnsLabelPrefix = this.config.dnsLabelPrefix;
       
+      // New ID to name mapping
+      const containerIdToName = new Map();
+      const containerNameToId = new Map();
+      
       // For tracking changes - track IDs, names, and their relationships
-      const containerIdToName = new Map();  // Map container IDs to names
-      const containerNameToId = new Map();  // Map container names to IDs
       const previousIds = new Set();        // Track previous container IDs
       const previousNames = new Set();      // Track previous container names
       const currentIds = new Set();         // Track current container IDs
@@ -234,6 +240,11 @@ class DockerMonitor {
             if (dnsLabels[`${dnsLabelPrefix}skip`] === 'true') {
               logger.info(`⚠️ Container ${name} has skip=true label - will skip DNS management`);
             }
+            
+            // If container has manage=true label, log it prominently
+            if (dnsLabels[`${dnsLabelPrefix}manage`] === 'true') {
+              logger.info(`⚠️ Container ${name} has manage=true label - will enable DNS management`);
+            }
           } else if (Object.keys(dnsLabels).length > 0) {
             // No changes but still has DNS labels - log at debug level
             logger.debug(`Container ${name} has DNS labels: ${JSON.stringify(dnsLabels)} (unchanged)`);
@@ -250,7 +261,11 @@ class DockerMonitor {
         const hasDnsLabels = prevLabels && Object.keys(prevLabels).some(key => key.startsWith(dnsLabelPrefix));
         
         if (hasDnsLabels) {
-          logger.info(`Container ${id} with DNS labels was removed`);
+          // Use the container name if we had it before
+          const oldName = this.containerIdToName.get(id);
+          const displayId = oldName || id;
+          
+          logger.info(`Container ${displayId} with DNS labels was removed`);
           // Only add to changes if we don't already have a matching name
           const name = [...previousNames].find(name => 
             this.containerLabelsCache[name] === prevLabels
@@ -286,9 +301,14 @@ class DockerMonitor {
           // If it looks like a container ID
           if (item.length > 12 && /^[0-9a-f]+$/.test(item)) {
             // Check if we have a name for this ID
-            const name = containerIdToName.get(item);
+            const name = containerIdToName.get(item) || this.containerIdToName.get(item);
             if (name && dnsLabelChanges[name]) {
               // Skip the ID since we have the name
+              continue;
+            }
+            // If we have a name but no change for it, use the name instead of ID
+            if (name) {
+              uniqueChanges.add(name);
               continue;
             }
           }
@@ -300,12 +320,16 @@ class DockerMonitor {
         logger.info(`DNS label changes detected on ${uniqueChangesArray.length} containers: ${uniqueChangesArray.join(', ')}`);
       }
       
+      // Update the cache and ID-name mapping
       this.containerLabelsCache = newCache;
+      this.containerIdToName = containerIdToName;
+      
       logger.debug(`Updated container labels cache with ${containers.length} containers`);
       
       // Publish an immediate event with the updated labels
       this.eventBus.publish(EventTypes.DOCKER_LABELS_UPDATED, {
         containerLabelsCache: this.containerLabelsCache,
+        containerIdToName: this.containerIdToName,
         triggerSource: 'updateContainerLabelsCache',
         hasChanges: changedItems.length > 0
       });
@@ -364,6 +388,13 @@ class DockerMonitor {
    */
   getContainerLabelsCache() {
     return this.containerLabelsCache;
+  }
+  
+  /**
+   * Get container name from ID if available
+   */
+  getContainerName(id) {
+    return this.containerIdToName.get(id) || id;
   }
   
   /**
