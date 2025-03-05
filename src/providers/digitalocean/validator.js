@@ -45,6 +45,19 @@ function validateRecord(record) {
       break;
       
     case 'CNAME':
+      if (!record.content) {
+        logger.trace(`digitalocean.validator: Content is missing for CNAME record`);
+        throw new Error('Content is required for CNAME records');
+      }
+      
+      // DigitalOcean has specific requirements for CNAME records
+      // Ensure the content is a valid domain or a domain with trailing dot
+      // For now, just warn if it's obviously not a domain - rely on converter to add trailing dot
+      if (record.content.includes(' ') || record.content.includes(',')) {
+        logger.warn(`CNAME content for ${record.name} appears to be invalid: ${record.content}`);
+      }
+      break;
+      
     case 'TXT':
     case 'NS':
       if (!record.content) {
@@ -104,6 +117,8 @@ function validateRecord(record) {
       logger.warn(`Record type ${record.type} may not be fully supported by DigitalOcean`);
       logger.trace(`digitalocean.validator: Unknown record type: ${record.type}`);
   }
+  
+  // DigitalOcean-specific validations
   
   // TTL validations
   if (record.ttl !== undefined && record.ttl < 30) {
