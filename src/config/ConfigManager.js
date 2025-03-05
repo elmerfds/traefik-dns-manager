@@ -43,7 +43,8 @@ class ConfigManager {
     this.traefikApiPassword = EnvironmentLoader.getString('TRAEFIK_API_PASSWORD');
     
     // Label prefixes
-    this.dnsLabelPrefix = EnvironmentLoader.getString('DNS_LABEL_PREFIX', 'dns.cloudflare.');
+    this.genericLabelPrefix = EnvironmentLoader.getString('DNS_LABEL_PREFIX', 'dns.');
+    this.dnsLabelPrefix = `${this.genericLabelPrefix}${this.dnsProvider}.`;
     this.traefikLabelPrefix = EnvironmentLoader.getString('TRAEFIK_LABEL_PREFIX', 'traefik.');
     
     // Global DNS defaults

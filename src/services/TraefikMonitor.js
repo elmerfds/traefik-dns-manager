@@ -6,6 +6,7 @@ const axios = require('axios');
 const logger = require('../utils/logger');
 const EventTypes = require('../events/EventTypes');
 const { extractHostnamesFromRule } = require('../utils/traefik');
+const { getLabelValue } = require('../utils/dns');
 
 class TraefikMonitor {
   constructor(config, eventBus) {
@@ -42,6 +43,9 @@ class TraefikMonitor {
     
     // Reference to DockerMonitor (will be set from app.js)
     this.dockerMonitor = null;
+    
+    // Last container ID to name mapping
+    this.lastContainerIdToName = new Map();
     
     // Subscribe to Docker label updates
     this.setupEventSubscriptions();
@@ -249,7 +253,8 @@ class TraefikMonitor {
   mergeContainerLabels(routerContainerLabels, dockerLabelsCache) {
     logger.debug('Merging router information with Docker container labels');
     const mergedLabels = { ...routerContainerLabels };
-    const labelPrefix = this.config.dnsLabelPrefix;
+    const genericPrefix = this.config.genericLabelPrefix;
+    const providerPrefix = this.config.dnsLabelPrefix;
     
     // For tracking changes in logging
     const firstPoll = !this.lastMergedLabels;
@@ -287,32 +292,39 @@ class TraefikMonitor {
           
           // Extract DNS-specific labels
           const dnsLabels = {};
+          // First collect provider-specific labels
           for (const [key, value] of Object.entries(containerLabels)) {
-            if (key.startsWith(labelPrefix)) {
+            if (key.startsWith(providerPrefix)) {
+              dnsLabels[key] = value;
+            }
+          }
+          // Then collect generic DNS labels that don't conflict with provider-specific ones
+          for (const [key, value] of Object.entries(containerLabels)) {
+            if (key.startsWith(genericPrefix) && !key.startsWith(providerPrefix)) {
               dnsLabels[key] = value;
             }
           }
           
           // Check if this is first poll or if the proxied setting has changed
-          const proxiedLabel = dnsLabels[`${labelPrefix}proxied`];
+          const proxiedLabel = getLabelValue(containerLabels, genericPrefix, providerPrefix, 'proxied', null);
           const previousLabels = this.lastMergedLabels?.[hostname];
-          const previousProxied = previousLabels?.[`${labelPrefix}proxied`];
+          const previousProxied = previousLabels?.[`${providerPrefix}proxied`] || previousLabels?.[`${genericPrefix}proxied`];
           
           // Only log at INFO level if this is the first poll or the proxied value has changed
           if (firstPoll || previousProxied !== proxiedLabel) {
             if (proxiedLabel === 'false') {
-              logger.info(`🔍 Found ${labelPrefix}proxied=false for ${hostname} from container ${containerName}`);
+              logger.info(`🔍 Found proxied=false for ${hostname} from container ${containerName}`);
               // Track the change for summary
               labelChanges[hostname] = 'unproxied';
             } else if (proxiedLabel === 'true' && previousProxied === 'false') {
-              logger.info(`🔍 Found ${labelPrefix}proxied=true for ${hostname} from container ${containerName}`);
+              logger.info(`🔍 Found proxied=true for ${hostname} from container ${containerName}`);
               // Track the change for summary
               labelChanges[hostname] = 'proxied';
             }
           } else {
             // Use debug level for repeated information
             if (proxiedLabel === 'false') {
-              logger.debug(`Found ${labelPrefix}proxied=false for ${hostname} from container ${containerName}`);
+              logger.debug(`Found proxied=false for ${hostname} from container ${containerName}`);
             }
           }
           
