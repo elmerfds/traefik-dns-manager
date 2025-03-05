@@ -47,6 +47,7 @@ The DNS Manager supports the following labels for customizing DNS record creatio
 | Label | Description | Default |
 |-------|-------------|---------|
 | `dns.cloudflare.skip` | Skip DNS management for this service | `false` |
+| `dns.cloudflare.manage` | Enable DNS management for this service | Depends on `DNS_DEFAULT_MANAGE` |
 | `dns.cloudflare.type` | DNS record type (A, AAAA, CNAME, etc.) | `CNAME` or `A` for apex domains |
 | `dns.cloudflare.content` | Record content/value | Domain for CNAME, Public IP for A |
 | `dns.cloudflare.proxied` | Enable Cloudflare proxy (orange cloud) | `true` |
@@ -117,6 +118,18 @@ services:
       - "dns.cloudflare.skip=true"  # Skip DNS management for this service
 ```
 
+### Opt-in DNS Management (when DNS_DEFAULT_MANAGE=false)
+
+```yaml
+services:
+  public-app:
+    image: public-image
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.public.rule=Host(`public.example.com`)"
+      - "dns.cloudflare.manage=true"  # Explicitly enable DNS management
+```
+
 ### Create MX Record
 
 ```yaml
@@ -153,6 +166,7 @@ services:
 | `DNS_DEFAULT_CONTENT` | Default record content | Value of `CLOUDFLARE_ZONE` | No |
 | `DNS_DEFAULT_PROXIED` | Default Cloudflare proxy status | `true` | No |
 | `DNS_DEFAULT_TTL` | Default TTL in seconds | `1` (automatic) | No |
+| `DNS_DEFAULT_MANAGE` | Global DNS management mode | `true` | No |
 
 ### IP Address Settings
 | Variable | Description | Default | Required |
@@ -170,6 +184,20 @@ services:
 | `DOCKER_SOCKET` | Path to Docker socket | `/var/run/docker.sock` | No |
 | `LOG_LEVEL` | Logging verbosity (ERROR, WARN, INFO, DEBUG, TRACE) | `INFO` | No |
 | `DNS_CACHE_REFRESH_INTERVAL` | How often to refresh DNS cache (ms) | `3600000` (1 hour) | No |
+
+## DNS Management Modes
+
+Traefik DNS Manager supports two operational modes for DNS management:
+
+### Opt-out Mode (Default)
+- Set `DNS_DEFAULT_MANAGE=true` or leave it unset
+- All services automatically get DNS records created
+- Services can opt-out with `dns.cloudflare.skip=true` label
+
+### Opt-in Mode
+- Set `DNS_DEFAULT_MANAGE=false`
+- Services need to explicitly opt-in with `dns.cloudflare.manage=true` label
+- Services can still use `dns.cloudflare.skip=true` to ensure no DNS management
 
 ## Logging System
 
@@ -190,10 +218,10 @@ The default level is `INFO`, which provides a clean, readable output with import
 The INFO level uses special formatting with emojis for better readability:
 
 ```
-✓ Starting Traefik DNS Manager
+✅ Starting Traefik DNS Manager
 ℹ️ Cloudflare Zone: example.com
 ℹ️ Processing 30 hostnames for DNS management
-✓ Created A record for example.com
+✅ Created A record for example.com
 ℹ️ 29 DNS records are up to date
 ✅ Traefik DNS Manager running successfully
 ```
