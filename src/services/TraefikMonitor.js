@@ -40,6 +40,9 @@ class TraefikMonitor {
     // Cache for the last seen container labels from Docker service
     this.lastDockerLabels = {};
     
+    // Reference to DockerMonitor (will be set from app.js)
+    this.dockerMonitor = null;
+    
     // Subscribe to Docker label updates
     this.setupEventSubscriptions();
   }
@@ -72,10 +75,11 @@ class TraefikMonitor {
   setupEventSubscriptions() {
     // Subscribe to Docker label updates
     this.eventBus.subscribe(EventTypes.DOCKER_LABELS_UPDATED, (data) => {
-      const { containerLabelsCache } = data;
+      const { containerLabelsCache, containerIdToName } = data;
       
       // Update our cache of Docker labels
       this.lastDockerLabels = containerLabelsCache || {};
+      this.lastContainerIdToName = containerIdToName || new Map();
       logger.debug('Updated Docker container labels cache in TraefikMonitor');
     });
   }
@@ -251,6 +255,14 @@ class TraefikMonitor {
     const firstPoll = !this.lastMergedLabels;
     const labelChanges = {};
     
+    // Get the container ID to name mapping from DockerMonitor
+    let containerIdToName = new Map();
+    if (this.dockerMonitor && this.dockerMonitor.containerIdToName) {
+      containerIdToName = this.dockerMonitor.containerIdToName;
+    } else if (this.lastContainerIdToName) {
+      containerIdToName = this.lastContainerIdToName;
+    }
+    
     // For each hostname
     for (const [hostname, routerLabels] of Object.entries(routerContainerLabels)) {
       const routerName = routerLabels.routerName;
@@ -269,7 +281,9 @@ class TraefikMonitor {
           containerLabels[`${this.config.traefikLabelPrefix}http.routers.${routerName}.service`] === serviceName ||
           containerLabels[`${this.config.traefikLabelPrefix}http.services.${serviceName}.loadbalancer.server.port`]
         ) {
-          logger.debug(`Found matching container ${containerId} for hostname ${hostname}`);
+          // Get container name if available
+          const containerName = containerIdToName.get(containerId) || containerId;
+          logger.debug(`Found matching container ${containerName} for hostname ${hostname}`);
           
           // Extract DNS-specific labels
           const dnsLabels = {};
@@ -287,18 +301,18 @@ class TraefikMonitor {
           // Only log at INFO level if this is the first poll or the proxied value has changed
           if (firstPoll || previousProxied !== proxiedLabel) {
             if (proxiedLabel === 'false') {
-              logger.info(`🔍 Found dns.cloudflare.proxied=false for ${hostname} from container ${containerId}`);
+              logger.info(`🔍 Found ${labelPrefix}proxied=false for ${hostname} from container ${containerName}`);
               // Track the change for summary
               labelChanges[hostname] = 'unproxied';
             } else if (proxiedLabel === 'true' && previousProxied === 'false') {
-              logger.info(`🔍 Found dns.cloudflare.proxied=true for ${hostname} from container ${containerId}`);
+              logger.info(`🔍 Found ${labelPrefix}proxied=true for ${hostname} from container ${containerName}`);
               // Track the change for summary
               labelChanges[hostname] = 'proxied';
             }
           } else {
             // Use debug level for repeated information
             if (proxiedLabel === 'false') {
-              logger.debug(`Found dns.cloudflare.proxied=false for ${hostname} from container ${containerId}`);
+              logger.debug(`Found ${labelPrefix}proxied=false for ${hostname} from container ${containerName}`);
             }
           }
           
