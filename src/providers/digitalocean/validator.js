@@ -127,7 +127,7 @@ function validateRecord(record) {
     record.ttl = 30;
   }
 
-  // Add in validateRecord function for CNAME type
+  // ValidateRecord function for CNAME type
   if (record.type === 'CNAME') {
     // Check if this is an apex domain pointing to itself
     if (record.name === record.content || 
