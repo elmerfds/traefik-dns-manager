@@ -45,6 +45,20 @@ function validateRecord(record) {
       break;
       
     case 'CNAME':
+      if (!record.content) {
+        logger.trace(`digitalocean.validator: Target is missing for CNAME record`);
+        throw new Error('Target is required for CNAME records');
+      }
+      
+      // Special handling for CNAME records - DigitalOcean requires fully qualified domain names
+      // If the content doesn't end with a dot and doesn't seem to be an absolute domain,
+      // we should add a trailing dot
+      if (!record.content.endsWith('.') && record.content.includes('.')) {
+        logger.debug(`Adding trailing period to CNAME content: ${record.content} → ${record.content}.`);
+        record.content = `${record.content}.`;
+      }
+      break;
+      
     case 'TXT':
     case 'NS':
       if (!record.content) {
@@ -58,6 +72,13 @@ function validateRecord(record) {
         logger.trace(`digitalocean.validator: Mail server is missing for MX record`);
         throw new Error('Mail server is required for MX records');
       }
+      
+      // Add trailing dot for MX records if missing
+      if (!record.content.endsWith('.') && record.content.includes('.')) {
+        logger.debug(`Adding trailing period to MX server: ${record.content} → ${record.content}.`);
+        record.content = `${record.content}.`;
+      }
+      
       // Set default priority if missing
       if (record.priority === undefined) {
         logger.trace(`digitalocean.validator: Setting default priority (10) for MX record`);
@@ -70,6 +91,13 @@ function validateRecord(record) {
         logger.trace(`digitalocean.validator: Target is missing for SRV record`);
         throw new Error('Target is required for SRV records');
       }
+      
+      // Add trailing dot for SRV target if missing
+      if (!record.content.endsWith('.') && record.content.includes('.')) {
+        logger.debug(`Adding trailing period to SRV target: ${record.content} → ${record.content}.`);
+        record.content = `${record.content}.`;
+      }
+      
       // Set defaults for SRV fields
       if (record.priority === undefined) {
         logger.trace(`digitalocean.validator: Setting default priority (1) for SRV record`);
