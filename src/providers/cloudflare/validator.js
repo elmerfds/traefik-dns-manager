@@ -1,7 +1,7 @@
 /**
  * Cloudflare-specific record validation utilities
  */
-const logger = require('../../logger');
+const logger = require('../../utils/logger');
 
 /**
  * Validate a Cloudflare DNS record configuration

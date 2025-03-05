@@ -28,7 +28,7 @@ class Logger {
     
     // Symbols for prettier INFO level logs
     this.symbols = {
-      success: '✓',
+      success: '✅',
       info: 'ℹ️',
       complete: '✅',
       error: '❌',
