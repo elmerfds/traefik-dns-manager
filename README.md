@@ -241,14 +241,12 @@ The default level is `INFO`, which provides a clean, readable output with import
 
 ### INFO Level Format
 
-The INFO level uses special formatting with emojis for better readability:
-
 ```
 ✅ Starting Traefik DNS Manager
-📌 Cloudflare Zone: example.com
-📌 Processing 30 hostnames for DNS management
+ℹ️ Cloudflare Zone: example.com
+ℹ️ Processing 30 hostnames for DNS management
 ✅ Created A record for example.com
-📌 29 DNS records are up to date
+ℹ️ 29 DNS records are up to date
 ✅ Traefik DNS Manager running successfully
 ```
 
