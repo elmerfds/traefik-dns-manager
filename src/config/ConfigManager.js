@@ -51,6 +51,7 @@ class ConfigManager {
     this.defaultContent = EnvironmentLoader.getString('DNS_DEFAULT_CONTENT', this.getProviderDomain());
     this.defaultProxied = EnvironmentLoader.getBool('DNS_DEFAULT_PROXIED', true);
     this.defaultTTL = EnvironmentLoader.getInt('DNS_DEFAULT_TTL', 1);
+    this.defaultManage = EnvironmentLoader.getBool('DNS_DEFAULT_MANAGE', true);
     
     // Record type specific defaults - we'll set A content after IP discovery
     this.recordDefaults = {
