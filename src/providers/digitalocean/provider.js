@@ -776,7 +776,7 @@ recordNeedsUpdate(existing, newRecord) {
   
   logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Final result - needs update: ${needsUpdate}`);
   return needsUpdate;
- }
+  }
 }
 
 module.exports = DigitalOceanProvider;
