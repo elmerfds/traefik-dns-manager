@@ -18,10 +18,10 @@ A service that automatically manages DNS records based on Traefik routing config
 ## Supported DNS Providers
 
 | Provider | Status | Implementation Details |
-|----------|--------|------------------------|
-| Cloudflare | ✅ Stable | Full support for all record types and features |
-| DigitalOcean | ✅ Stable | Full support for all record types and features |
-| Route53 (AWS) | 🔄 Planned | Coming soon |
+|:--------:|:------:|:----------------------:|
+| ![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white) | ![Stable](https://img.shields.io/badge/✓-Stable-success) | Full support for all record types and features |
+| ![DigitalOcean](https://img.shields.io/badge/DigitalOcean-0080FF?style=flat&logo=digitalocean&logoColor=white) | ![Stable](https://img.shields.io/badge/✓-Stable-success) | Full support for all record types and features |
+| ![AWS](https://img.shields.io/badge/Route53-FF9900?style=flat&logo=amazonaws&logoColor=white) | ![Planned](https://img.shields.io/badge/⟳-Planned-blue) | Coming soon |
 
 ## Quick Start
 
