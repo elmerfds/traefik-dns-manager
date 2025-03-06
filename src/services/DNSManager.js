@@ -244,7 +244,7 @@ class DNSManager {
     return `${hostname}.${zone}`;
   }
   
-    /**
+  /**
    * Clean up orphaned DNS records
    */
   async cleanupOrphanedRecords(activeHostnames) {
@@ -263,6 +263,7 @@ class DNSManager {
       // Find records that were created by this tool but no longer exist in Traefik
       const orphanedRecords = [];
       const domainSuffix = `.${this.config.getProviderDomain()}`;
+      const domainName = this.config.getProviderDomain().toLowerCase();
       
       for (const record of allRecords) {
         // Skip apex domain/root records
@@ -277,21 +278,40 @@ class DNSManager {
           continue;
         }
         
-        // Reconstruct the FQDN from DO's record name format
+        // Reconstruct the FQDN from record name format
         let recordFqdn;
         if (record.name === '@') {
-          recordFqdn = this.config.getProviderDomain();
+          recordFqdn = domainName;
         } else {
-          recordFqdn = `${record.name}${domainSuffix}`;
+          // Check if the record name already contains the domain
+          const recordName = record.name.toLowerCase();
+          if (recordName.endsWith(domainName)) {
+            // Already has domain name, use as is
+            recordFqdn = recordName;
+          } else {
+            // Need to append domain
+            recordFqdn = `${recordName}${domainSuffix}`;
+          }
         }
         
-        // Normalize for comparison
-        const normalizedRecordFqdn = recordFqdn.toLowerCase();
+        // Check for domain duplication (e.g., example.com.example.com)
+        const doublePattern = new RegExp(`${domainName}\\.${domainName}$`, 'i');
+        if (doublePattern.test(recordFqdn)) {
+          // Remove the duplicated domain part
+          recordFqdn = recordFqdn.replace(doublePattern, domainName);
+          logger.debug(`Fixed duplicated domain in record: ${recordFqdn}`);
+        }
+        
+        // Log each record for debugging
+        logger.debug(`Checking record FQDN: ${recordFqdn} (${record.type})`);
         
         // Check if this record is still active
-        if (!normalizedActiveHostnames.has(normalizedRecordFqdn)) {
+        if (!normalizedActiveHostnames.has(recordFqdn)) {
           logger.debug(`Found orphaned record: ${recordFqdn} (${record.type})`);
-          orphanedRecords.push(record);
+          orphanedRecords.push({
+            ...record,
+            displayName: recordFqdn // Save the normalized display name
+          });
         }
       }
       
@@ -300,11 +320,11 @@ class DNSManager {
         logger.info(`Found ${orphanedRecords.length} orphaned DNS records to clean up`);
         
         for (const record of orphanedRecords) {
-          // Format the name for display
-          const displayName = record.name === '@' 
-            ? this.config.getProviderDomain() 
-            : `${record.name}.${this.config.getProviderDomain()}`;
-            
+          // Use the saved display name for logging
+          const displayName = record.displayName || 
+                             (record.name === '@' ? this.config.getProviderDomain() 
+                                                 : `${record.name}.${this.config.getProviderDomain()}`);
+                             
           logger.info(`🗑️ Removing orphaned DNS record: ${displayName} (${record.type})`);
           
           try {
