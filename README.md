@@ -45,8 +45,8 @@ services:
       - CLOUDFLARE_ZONE=example.com
       
       # DigitalOcean settings (if using DigitalOcean)
-      - DIGITALOCEAN_TOKEN=your_digitalocean_api_token
-      - DIGITALOCEAN_DOMAIN=example.com
+      - DO_TOKEN=your_digitalocean_api_token
+      - DO_DOMAIN=example.com
       
       # Traefik API settings
       - TRAEFIK_API_URL=http://traefik:8080/api
@@ -85,8 +85,8 @@ DigitalOcean requires an API token with write access to your domain:
 ```yaml
 environment:
   - DNS_PROVIDER=digitalocean
-  - DIGITALOCEAN_TOKEN=your_digitalocean_api_token
-  - DIGITALOCEAN_DOMAIN=example.com
+  - DO_TOKEN=your_digitalocean_api_token
+  - DO_DOMAIN=example.com
 ```
 
 DigitalOcean-specific notes:
@@ -265,8 +265,8 @@ services:
 ### DigitalOcean Settings
 | Variable | Description | Default | Required if using DigitalOcean |
 |----------|-------------|---------|----------|
-| `DIGITALOCEAN_TOKEN` | DigitalOcean API token with write access | - | Yes |
-| `DIGITALOCEAN_DOMAIN` | Your domain name (e.g., example.com) | - | Yes |
+| `DO_TOKEN` | DigitalOcean API token with write access | - | Yes |
+| `DO_DOMAIN` | Your domain name (e.g., example.com) | - | Yes |
 
 ### Traefik API Settings
 | Variable | Description | Default | Required |
@@ -280,7 +280,7 @@ services:
 |----------|-------------|---------|----------|
 | `DNS_LABEL_PREFIX` | Base prefix for DNS labels | `dns.` | No |
 | `DNS_DEFAULT_TYPE` | Default DNS record type | `CNAME` | No |
-| `DNS_DEFAULT_CONTENT` | Default record content | Value of `CLOUDFLARE_ZONE` or `DIGITALOCEAN_DOMAIN` | No |
+| `DNS_DEFAULT_CONTENT` | Default record content | Value of `CLOUDFLARE_ZONE` or `DO_DOMAIN` | No |
 | `DNS_DEFAULT_PROXIED` | Default Cloudflare proxy status | `true` | No |
 | `DNS_DEFAULT_TTL` | Default TTL in seconds | `1` (Auto for Cloudflare) or minimum TTL for provider | No |
 | `DNS_DEFAULT_MANAGE` | Global DNS management mode | `true` | No |
