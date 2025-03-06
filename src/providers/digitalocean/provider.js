@@ -302,53 +302,6 @@ class DigitalOceanProvider extends DNSProvider {
   }
   
   /**
-   * Create a new DNS record
-   */
-  async createRecord(record) {
-    logger.trace(`DigitalOceanProvider.createRecord: Creating record type=${record.type}, name=${record.name}, content=${record.content}`);
-    
-    try {
-      // Validate the record first
-      validateRecord(record);
-      
-      // Convert name format for DO - extract subdomain part
-      const recordData = this.prepareRecordForCreation(record);
-      
-      // Convert to DigitalOcean format
-      const doRecord = convertToDigitalOceanFormat(recordData);
-      
-      logger.trace(`DigitalOceanProvider.createRecord: Sending create request to DigitalOcean API: ${JSON.stringify(doRecord)}`);
-      
-      const response = await this.client.post(
-        `/domains/${this.domain}/records`,
-        doRecord
-      );
-      
-      const createdRecord = response.data.domain_record;
-      logger.trace(`DigitalOceanProvider.createRecord: Record created successfully, ID=${createdRecord.id}`);
-      
-      // Update the cache with the new record
-      this.updateRecordInCache(createdRecord);
-      
-      // Log at INFO level which record was created
-      logger.info(`✨ Created ${record.type} record for ${record.name}`);
-      logger.success(`Created ${record.type} record for ${record.name}`);
-      
-      // Update stats counter if available
-      if (global.statsCounter) {
-        global.statsCounter.created++;
-        logger.trace(`DigitalOceanProvider.createRecord: Incremented global.statsCounter.created to ${global.statsCounter.created}`);
-      }
-      
-      return createdRecord;
-    } catch (error) {
-      logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
-      logger.trace(`DigitalOceanProvider.createRecord: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
-      throw error;
-    }
-  }
-  
-  /**
    * Prepare record for creation by formatting it for DigitalOcean
    */
   prepareRecordForCreation(record) {
@@ -366,7 +319,151 @@ class DigitalOceanProvider extends DNSProvider {
       }
     }
     
+    // For apex domains being added via the @ symbol, we need special handling
+    if (recordData.name === '@' && recordData.type === 'A') {
+      logger.debug('Special handling for apex domain A record');
+      
+      // Log more details to help debug
+      logger.debug(`Apex domain record details: 
+        Name: ${recordData.name}
+        Type: ${recordData.type}
+        Content: ${recordData.content}
+        TTL: ${recordData.ttl}
+      `);
+      
+      // Make sure we have a valid IP
+      if (!recordData.content.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        logger.error(`Invalid IP address for apex domain A record: ${recordData.content}`);
+        throw new Error(`Invalid IP address format for apex domain A record: ${recordData.content}`);
+      }
+    }
+    
     return recordData;
+  }
+  
+  /**
+   * Create a new DNS record
+   */
+  async createRecord(record) {
+    logger.trace(`DigitalOceanProvider.createRecord: Creating record type=${record.type}, name=${record.name}, content=${record.content}`);
+    
+    try {
+      // Validate the record first
+      validateRecord(record);
+      
+      // Convert name format for DO - extract subdomain part
+      const recordData = this.prepareRecordForCreation(record);
+      
+      // Convert to DigitalOcean format
+      const doRecord = convertToDigitalOceanFormat(recordData);
+      
+      logger.trace(`DigitalOceanProvider.createRecord: Sending create request to DigitalOcean API: ${JSON.stringify(doRecord)}`);
+      
+      try {
+        const response = await this.client.post(
+          `/domains/${this.domain}/records`,
+          doRecord
+        );
+        
+        const createdRecord = response.data.domain_record;
+        logger.trace(`DigitalOceanProvider.createRecord: Record created successfully, ID=${createdRecord.id}`);
+        
+        // Update the cache with the new record
+        this.updateRecordInCache(createdRecord);
+        
+        // Log at INFO level which record was created
+        logger.info(`✨ Created ${record.type} record for ${record.name}`);
+        logger.success(`Created ${record.type} record for ${record.name}`);
+        
+        // Update stats counter if available
+        if (global.statsCounter) {
+          global.statsCounter.created++;
+          logger.trace(`DigitalOceanProvider.createRecord: Incremented global.statsCounter.created to ${global.statsCounter.created}`);
+        }
+        
+        return createdRecord;
+      } catch (apiError) {
+        // Enhanced error handling for API errors
+        if (apiError.response) {
+          const statusCode = apiError.response.status;
+          const responseData = apiError.response.data || {};
+          
+          // Special handling for 422 errors (validation failures)
+          if (statusCode === 422) {
+            logger.error(`DigitalOcean API validation error: ${JSON.stringify(responseData)}`);
+            
+            // Check for common errors
+            const isApexDomain = record.name === this.domain || recordData.name === '@';
+            if (isApexDomain) {
+              logger.debug('This appears to be an apex domain record issue.');
+              
+              // For apex domains we often need to check if the record already exists
+              logger.debug('Checking if record already exists...');
+              
+              try {
+                // Use the listRecords method to find matching records
+                const existingRecords = await this.listRecords({
+                  type: record.type,
+                  name: isApexDomain ? '@' : recordData.name
+                });
+                
+                if (existingRecords && existingRecords.length > 0) {
+                  logger.info(`Found existing record for ${record.name}, no need to create`);
+                  return existingRecords[0]; // Return the existing record
+                }
+              } catch (listError) {
+                logger.error(`Error checking for existing records: ${listError.message}`);
+              }
+              
+              // If we're here, the record doesn't exist but creation failed
+              if (record.type === 'A') {
+                // For A records, try using the name '@' directly
+                try {
+                  const manualRecord = {
+                    type: 'A',
+                    name: '@',
+                    data: record.content,
+                    ttl: record.ttl || 30
+                  };
+                  
+                  logger.debug(`Trying direct creation with: ${JSON.stringify(manualRecord)}`);
+                  
+                  const response = await this.client.post(
+                    `/domains/${this.domain}/records`,
+                    manualRecord
+                  );
+                  
+                  const createdRecord = response.data.domain_record;
+                  logger.success(`Successfully created apex domain record using direct method`);
+                  
+                  // Update the cache
+                  this.updateRecordInCache(createdRecord);
+                  
+                  return createdRecord;
+                } catch (manualError) {
+                  logger.error(`Manual creation also failed: ${manualError.message}`);
+                  if (manualError.response) {
+                    logger.debug(`Error details: ${JSON.stringify(manualError.response.data)}`);
+                  }
+                }
+              }
+            }
+          }
+          
+          // Log comprehensive error details
+          logger.error(`API error ${statusCode}: ${responseData.message || 'Unknown error'}`);
+          if (responseData.error) {
+            logger.debug(`Error details: ${JSON.stringify(responseData.error)}`);
+          }
+        }
+        
+        throw apiError; // Re-throw after logging details
+      }
+    } catch (error) {
+      logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
+      logger.trace(`DigitalOceanProvider.createRecord: Error details: ${JSON.stringify(error.response?.data || error.message)}`);
+      throw error;
+    }
   }
   
   /**
@@ -500,6 +597,97 @@ class DigitalOceanProvider extends DNSProvider {
   }
   
   /**
+   * Special handler for apex domain records
+   * This is needed because DigitalOcean has specific requirements for apex domains
+   */
+  async handleApexDomain(record) {
+    logger.debug(`DigitalOceanProvider.handleApexDomain: Handling apex domain record: ${JSON.stringify(record)}`);
+    
+    if (record.type !== 'A' && record.type !== 'AAAA') {
+      logger.warn(`Apex domain record of type ${record.type} may not be supported by DigitalOcean`);
+    }
+    
+    // For apex domains, DigitalOcean requires the name to be '@'
+    const apexRecord = {
+      type: record.type,
+      name: '@',
+      data: record.content,
+      ttl: record.ttl || 30
+    };
+    
+    // First check if the record already exists
+    logger.debug('Checking if apex domain record already exists...');
+    
+    try {
+      const existingRecords = await this.listRecords({
+        type: record.type,
+        name: '@'
+      });
+      
+      if (existingRecords && existingRecords.length > 0) {
+        const existing = existingRecords[0];
+        logger.debug(`Found existing apex domain record: ${JSON.stringify(existing)}`);
+        
+        // Check if update is needed
+        if (existing.data !== record.content || existing.ttl !== record.ttl) {
+          logger.info(`Updating existing apex domain record (${record.type} for ${this.domain})`);
+          
+          try {
+            const response = await this.client.put(
+              `/domains/${this.domain}/records/${existing.id}`,
+              apexRecord
+            );
+            
+            const updatedRecord = response.data.domain_record;
+            logger.success(`Successfully updated apex domain record`);
+            
+            // Update the cache
+            this.updateRecordInCache(updatedRecord);
+            
+            return updatedRecord;
+          } catch (updateError) {
+            logger.error(`Failed to update apex domain record: ${updateError.message}`);
+            if (updateError.response) {
+              logger.debug(`Error details: ${JSON.stringify(updateError.response.data)}`);
+            }
+            throw updateError;
+          }
+        } else {
+          logger.info(`Apex domain record is already up to date (${record.type} for ${this.domain})`);
+          return existing;
+        }
+      } else {
+        // Need to create a new record
+        logger.info(`Creating new apex domain record (${record.type} for ${this.domain})`);
+        
+        try {
+          const response = await this.client.post(
+            `/domains/${this.domain}/records`,
+            apexRecord
+          );
+          
+          const createdRecord = response.data.domain_record;
+          logger.success(`Successfully created apex domain record`);
+          
+          // Update the cache
+          this.updateRecordInCache(createdRecord);
+          
+          return createdRecord;
+        } catch (createError) {
+          logger.error(`Failed to create apex domain record: ${createError.message}`);
+          if (createError.response) {
+            logger.debug(`Error details: ${JSON.stringify(createError.response.data)}`);
+          }
+          throw createError;
+        }
+      }
+    } catch (error) {
+      logger.error(`Error handling apex domain: ${error.message}`);
+      throw error;
+    }
+  }
+  
+  /**
    * Batch process multiple DNS records at once
    */
   async batchEnsureRecords(recordConfigs) {
@@ -520,7 +708,8 @@ class DigitalOceanProvider extends DNSProvider {
       const pendingChanges = {
         create: [],
         update: [],
-        unchanged: []
+        unchanged: [],
+        apex: [] // Special handling for apex domains
       };
       
       // First pass: examine all records and sort into categories
@@ -551,6 +740,17 @@ class DigitalOceanProvider extends DNSProvider {
           // Validate the record
           validateRecord(recordConfig);
           
+          // Check if this is an apex domain
+          const isApex = recordConfig.name === this.domain;
+          
+          if (isApex) {
+            logger.debug(`Detected apex domain record: ${recordConfig.name}`);
+            pendingChanges.apex.push({
+              record: recordConfig
+            });
+            continue; // Skip the normal processing flow
+          }
+          
           // Find existing record in cache
           const existing = this.findRecordInCache(recordConfig.type, recordConfig.name);
           
@@ -572,7 +772,7 @@ class DigitalOceanProvider extends DNSProvider {
                 record: recordConfig,
                 existing
               });
-              
+
               // Update stats counter if available
               if (global.statsCounter) {
                 global.statsCounter.upToDate++;
@@ -599,8 +799,25 @@ class DigitalOceanProvider extends DNSProvider {
       }
       
       // Second pass: apply all changes
-      logger.debug(`DNS changes: ${pendingChanges.create.length} to create, ${pendingChanges.update.length} to update, ${pendingChanges.unchanged.length} unchanged`);
+      logger.debug(`DNS changes: ${pendingChanges.create.length} to create, ${pendingChanges.update.length} to update, ${pendingChanges.unchanged.length} unchanged, ${pendingChanges.apex.length} apex domains`);
       logger.trace('DigitalOceanProvider.batchEnsureRecords: Second pass - applying changes');
+      
+      // Handle apex domains first
+      for (const { record } of pendingChanges.apex) {
+        try {
+          logger.trace(`DigitalOceanProvider.batchEnsureRecords: Handling apex domain ${record.name} (${record.type})`);
+          logger.info(`🌐 Processing apex domain record for ${record.name}`);
+          const result = await this.handleApexDomain(record);
+          results.push(result);
+        } catch (error) {
+          logger.error(`Failed to handle apex domain ${record.name}: ${error.message}`);
+          logger.trace(`DigitalOceanProvider.batchEnsureRecords: Apex domain error: ${error.message}`);
+          
+          if (global.statsCounter) {
+            global.statsCounter.errors++;
+          }
+        }
+      }
       
       // Create new records
       for (const { record } of pendingChanges.create) {
@@ -652,130 +869,130 @@ class DigitalOceanProvider extends DNSProvider {
     }
   }
   
-/**
- * Check if a record needs to be updated
- */
-recordNeedsUpdate(existing, newRecord) {
-  logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Comparing records for ${newRecord.name}`);
-  logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Existing: ${JSON.stringify(existing)}`);
-  logger.trace(`DigitalOceanProvider.recordNeedsUpdate: New: ${JSON.stringify(newRecord)}`);
-  
-  // Extract the correct content field based on record type
-  let existingContent = existing.data;
-  let newContent = newRecord.content;
-  
-  // Handle special case for apex domains in CNAME records
-  if (existing.name === '@' && newContent === this.domain) {
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Special case - apex domain matches domain name`);
-    return false; // They're equivalent, no update needed
-  }
-  
-  // Handle trailing dots for content comparison in relevant record types
-  if (['CNAME', 'MX', 'SRV', 'NS'].includes(newRecord.type)) {
-    // Normalize both contents by removing trailing dots for comparison
-    if (existingContent && existingContent.endsWith('.')) {
-      existingContent = existingContent.slice(0, -1);
-    }
-    if (newContent && newContent.endsWith('.')) {
-      newContent = newContent.slice(0, -1);
+  /**
+   * Check if a record needs to be updated
+   */
+  recordNeedsUpdate(existing, newRecord) {
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Comparing records for ${newRecord.name}`);
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Existing: ${JSON.stringify(existing)}`);
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: New: ${JSON.stringify(newRecord)}`);
+    
+    // Extract the correct content field based on record type
+    let existingContent = existing.data;
+    let newContent = newRecord.content;
+    
+    // Handle special case for apex domains in CNAME records
+    if (existing.name === '@' && newContent === this.domain) {
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Special case - apex domain matches domain name`);
+      return false; // They're equivalent, no update needed
     }
     
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Normalized existing content: ${existingContent}`);
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Normalized new content: ${newContent}`);
-  }
-  
-  // Handle the case where existing content is full qualified with trailing dot
-  // but new content is the domain name without dot
-  if (existingContent && newContent) {
-    if (existingContent === `${newContent}.`) {
-      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Content matches with trailing dot difference`);
-      existingContent = newContent; // They're equivalent
-    }
-    
-    // Check if existing content is '@' and new content is the domain
-    if (existingContent === '@' && newContent === this.domain) {
-      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: @ symbol matches domain name`);
-      existingContent = newContent; // They're equivalent
-    }
-  }
-  
-  // Compare basic fields
-  let needsUpdate = false;
-  
-  // Compare content/data
-  if (existingContent !== newContent) {
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Content different: ${existingContent} vs ${newContent}`);
-    needsUpdate = true;
-  }
-  
-  // Compare TTL
-  if (existing.ttl !== newRecord.ttl) {
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: TTL different: ${existing.ttl} vs ${newRecord.ttl}`);
-    needsUpdate = true;
-  }
-  
-  // Type-specific field comparisons
-  switch (newRecord.type) {
-    case 'MX':
-      if (existing.priority !== newRecord.priority) {
-        logger.trace(`DigitalOceanProvider.recordNeedsUpdate: MX priority different: ${existing.priority} vs ${newRecord.priority}`);
-        needsUpdate = true;
+    // Handle trailing dots for content comparison in relevant record types
+    if (['CNAME', 'MX', 'SRV', 'NS'].includes(newRecord.type)) {
+      // Normalize both contents by removing trailing dots for comparison
+      if (existingContent && existingContent.endsWith('.')) {
+        existingContent = existingContent.slice(0, -1);
       }
-      break;
+      if (newContent && newContent.endsWith('.')) {
+        newContent = newContent.slice(0, -1);
+      }
       
-    case 'SRV':
-      if (existing.priority !== newRecord.priority ||
-          existing.weight !== newRecord.weight ||
-          existing.port !== newRecord.port) {
-        logger.trace(`DigitalOceanProvider.recordNeedsUpdate: SRV fields different`);
-        needsUpdate = true;
-      }
-      break;
-      
-    case 'CAA':
-      if (existing.flags !== newRecord.flags ||
-          existing.tag !== newRecord.tag) {
-        logger.trace(`DigitalOceanProvider.recordNeedsUpdate: CAA fields different`);
-        needsUpdate = true;
-      }
-      break;
-  }
-  
-  // If an update is needed, log the specific differences at DEBUG level
-  if (needsUpdate && logger.level >= 3) { // DEBUG level or higher
-    logger.debug(`Record ${newRecord.name} needs update:`);
-    if (existingContent !== newContent) 
-      logger.debug(` - Content: ${existingContent} → ${newContent}`);
-    if (existing.ttl !== newRecord.ttl) 
-      logger.debug(` - TTL: ${existing.ttl} → ${newRecord.ttl}`);
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Normalized existing content: ${existingContent}`);
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Normalized new content: ${newContent}`);
+    }
     
-    // Log type-specific field changes
+    // Handle the case where existing content is full qualified with trailing dot
+    // but new content is the domain name without dot
+    if (existingContent && newContent) {
+      if (existingContent === `${newContent}.`) {
+        logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Content matches with trailing dot difference`);
+        existingContent = newContent; // They're equivalent
+      }
+      
+      // Check if existing content is '@' and new content is the domain
+      if (existingContent === '@' && newContent === this.domain) {
+        logger.trace(`DigitalOceanProvider.recordNeedsUpdate: @ symbol matches domain name`);
+        existingContent = newContent; // They're equivalent
+      }
+    }
+    
+    // Compare basic fields
+    let needsUpdate = false;
+    
+    // Compare content/data
+    if (existingContent !== newContent) {
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Content different: ${existingContent} vs ${newContent}`);
+      needsUpdate = true;
+    }
+    
+    // Compare TTL
+    if (existing.ttl !== newRecord.ttl) {
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: TTL different: ${existing.ttl} vs ${newRecord.ttl}`);
+      needsUpdate = true;
+    }
+    
+    // Type-specific field comparisons
     switch (newRecord.type) {
       case 'MX':
-        if (existing.priority !== newRecord.priority)
-          logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
+        if (existing.priority !== newRecord.priority) {
+          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: MX priority different: ${existing.priority} vs ${newRecord.priority}`);
+          needsUpdate = true;
+        }
         break;
         
       case 'SRV':
-        if (existing.priority !== newRecord.priority)
-          logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
-        if (existing.weight !== newRecord.weight)
-          logger.debug(` - Weight: ${existing.weight} → ${newRecord.weight}`);
-        if (existing.port !== newRecord.port)
-          logger.debug(` - Port: ${existing.port} → ${newRecord.port}`);
+        if (existing.priority !== newRecord.priority ||
+            existing.weight !== newRecord.weight ||
+            existing.port !== newRecord.port) {
+          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: SRV fields different`);
+          needsUpdate = true;
+        }
         break;
         
       case 'CAA':
-        if (existing.flags !== newRecord.flags)
-          logger.debug(` - Flags: ${existing.flags} → ${newRecord.flags}`);
-        if (existing.tag !== newRecord.tag)
-          logger.debug(` - Tag: ${existing.tag} → ${newRecord.tag}`);
+        if (existing.flags !== newRecord.flags ||
+            existing.tag !== newRecord.tag) {
+          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: CAA fields different`);
+          needsUpdate = true;
+        }
         break;
     }
-  }
-  
-  logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Final result - needs update: ${needsUpdate}`);
-  return needsUpdate;
+    
+    // If an update is needed, log the specific differences at DEBUG level
+    if (needsUpdate && logger.level >= 3) { // DEBUG level or higher
+      logger.debug(`Record ${newRecord.name} needs update:`);
+      if (existingContent !== newContent) 
+        logger.debug(` - Content: ${existingContent} → ${newContent}`);
+      if (existing.ttl !== newRecord.ttl) 
+        logger.debug(` - TTL: ${existing.ttl} → ${newRecord.ttl}`);
+      
+      // Log type-specific field changes
+      switch (newRecord.type) {
+        case 'MX':
+          if (existing.priority !== newRecord.priority)
+            logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
+          break;
+          
+        case 'SRV':
+          if (existing.priority !== newRecord.priority)
+            logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
+          if (existing.weight !== newRecord.weight)
+            logger.debug(` - Weight: ${existing.weight} → ${newRecord.weight}`);
+          if (existing.port !== newRecord.port)
+            logger.debug(` - Port: ${existing.port} → ${newRecord.port}`);
+          break;
+          
+        case 'CAA':
+          if (existing.flags !== newRecord.flags)
+            logger.debug(` - Flags: ${existing.flags} → ${newRecord.flags}`);
+          if (existing.tag !== newRecord.tag)
+            logger.debug(` - Tag: ${existing.tag} → ${newRecord.tag}`);
+          break;
+      }
+    }
+    
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Final result - needs update: ${needsUpdate}`);
+    return needsUpdate;
   }
 }
 
