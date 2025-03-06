@@ -70,7 +70,7 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
   const providerPrefix = config.dnsLabelPrefix;
   
   // Check if this is an apex domain
-  const isApex = isApexDomain(hostname, config.cloudflareZone);
+  const isApex = isApexDomain(hostname, config.getProviderDomain());
   
   // Determine record type - first from specific labels, then from default
   const recordTypeLabel = getLabelValue(labels, genericPrefix, providerPrefix, 'type', null);
@@ -121,8 +121,8 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
     logger.trace(`dns.extractDnsConfigFromLabels: Using label-specified content: ${content}`);
   }
   
-  // Handle proxied status
-  if (['A', 'AAAA', 'CNAME'].includes(recordConfig.type)) {
+  // Handle proxied status ONLY for providers that support it (Cloudflare)
+  if (['A', 'AAAA', 'CNAME'].includes(recordConfig.type) && config.dnsProvider === 'cloudflare') {
     const proxiedLabel = getLabelValue(labels, genericPrefix, providerPrefix, 'proxied', null);
     logger.debug(`Processing proxied status for ${hostname}: Label value = ${proxiedLabel}`);
     
