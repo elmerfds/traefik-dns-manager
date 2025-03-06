@@ -652,110 +652,131 @@ class DigitalOceanProvider extends DNSProvider {
     }
   }
   
-  /**
-   * Check if a record needs to be updated
-   */
-  recordNeedsUpdate(existing, newRecord) {
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Comparing records for ${newRecord.name}`);
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Existing: ${JSON.stringify(existing)}`);
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: New: ${JSON.stringify(newRecord)}`);
+/**
+ * Check if a record needs to be updated
+ */
+recordNeedsUpdate(existing, newRecord) {
+  logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Comparing records for ${newRecord.name}`);
+  logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Existing: ${JSON.stringify(existing)}`);
+  logger.trace(`DigitalOceanProvider.recordNeedsUpdate: New: ${JSON.stringify(newRecord)}`);
+  
+  // Extract the correct content field based on record type
+  let existingContent = existing.data;
+  let newContent = newRecord.content;
+  
+  // Handle special case for apex domains in CNAME records
+  if (existing.name === '@' && newContent === this.domain) {
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Special case - apex domain matches domain name`);
+    return false; // They're equivalent, no update needed
+  }
+  
+  // Handle trailing dots for content comparison in relevant record types
+  if (['CNAME', 'MX', 'SRV', 'NS'].includes(newRecord.type)) {
+    // Normalize both contents by removing trailing dots for comparison
+    if (existingContent && existingContent.endsWith('.')) {
+      existingContent = existingContent.slice(0, -1);
+    }
+    if (newContent && newContent.endsWith('.')) {
+      newContent = newContent.slice(0, -1);
+    }
     
-    // Extract the correct content field based on record type
-    let existingContent = existing.data;
-    let newContent = newRecord.content;
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Normalized existing content: ${existingContent}`);
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Normalized new content: ${newContent}`);
+  }
+  
+  // Handle the case where existing content is full qualified with trailing dot
+  // but new content is the domain name without dot
+  if (existingContent && newContent) {
+    if (existingContent === `${newContent}.`) {
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Content matches with trailing dot difference`);
+      existingContent = newContent; // They're equivalent
+    }
     
-    // Handle trailing dots for content comparison in relevant record types
-    if (['CNAME', 'MX', 'SRV', 'NS'].includes(newRecord.type)) {
-      // Normalize both contents by removing trailing dots for comparison
-      if (existingContent && existingContent.endsWith('.')) {
-        existingContent = existingContent.slice(0, -1);
+    // Check if existing content is '@' and new content is the domain
+    if (existingContent === '@' && newContent === this.domain) {
+      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: @ symbol matches domain name`);
+      existingContent = newContent; // They're equivalent
+    }
+  }
+  
+  // Compare basic fields
+  let needsUpdate = false;
+  
+  // Compare content/data
+  if (existingContent !== newContent) {
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Content different: ${existingContent} vs ${newContent}`);
+    needsUpdate = true;
+  }
+  
+  // Compare TTL
+  if (existing.ttl !== newRecord.ttl) {
+    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: TTL different: ${existing.ttl} vs ${newRecord.ttl}`);
+    needsUpdate = true;
+  }
+  
+  // Type-specific field comparisons
+  switch (newRecord.type) {
+    case 'MX':
+      if (existing.priority !== newRecord.priority) {
+        logger.trace(`DigitalOceanProvider.recordNeedsUpdate: MX priority different: ${existing.priority} vs ${newRecord.priority}`);
+        needsUpdate = true;
       }
-      if (newContent && newContent.endsWith('.')) {
-        newContent = newContent.slice(0, -1);
-      }
+      break;
       
-      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Normalized existing content: ${existingContent}`);
-      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Normalized new content: ${newContent}`);
-    }
+    case 'SRV':
+      if (existing.priority !== newRecord.priority ||
+          existing.weight !== newRecord.weight ||
+          existing.port !== newRecord.port) {
+        logger.trace(`DigitalOceanProvider.recordNeedsUpdate: SRV fields different`);
+        needsUpdate = true;
+      }
+      break;
+      
+    case 'CAA':
+      if (existing.flags !== newRecord.flags ||
+          existing.tag !== newRecord.tag) {
+        logger.trace(`DigitalOceanProvider.recordNeedsUpdate: CAA fields different`);
+        needsUpdate = true;
+      }
+      break;
+  }
+  
+  // If an update is needed, log the specific differences at DEBUG level
+  if (needsUpdate && logger.level >= 3) { // DEBUG level or higher
+    logger.debug(`Record ${newRecord.name} needs update:`);
+    if (existingContent !== newContent) 
+      logger.debug(` - Content: ${existingContent} → ${newContent}`);
+    if (existing.ttl !== newRecord.ttl) 
+      logger.debug(` - TTL: ${existing.ttl} → ${newRecord.ttl}`);
     
-    // Compare basic fields
-    let needsUpdate = false;
-    
-    // Compare content/data
-    if (existingContent !== newContent) {
-      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Content different: ${existingContent} vs ${newContent}`);
-      needsUpdate = true;
-    }
-    
-    // Compare TTL
-    if (existing.ttl !== newRecord.ttl) {
-      logger.trace(`DigitalOceanProvider.recordNeedsUpdate: TTL different: ${existing.ttl} vs ${newRecord.ttl}`);
-      needsUpdate = true;
-    }
-    
-    // Type-specific field comparisons
+    // Log type-specific field changes
     switch (newRecord.type) {
       case 'MX':
-        if (existing.priority !== newRecord.priority) {
-          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: MX priority different: ${existing.priority} vs ${newRecord.priority}`);
-          needsUpdate = true;
-        }
+        if (existing.priority !== newRecord.priority)
+          logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
         break;
         
       case 'SRV':
-        if (existing.priority !== newRecord.priority ||
-            existing.weight !== newRecord.weight ||
-            existing.port !== newRecord.port) {
-          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: SRV fields different`);
-          needsUpdate = true;
-        }
+        if (existing.priority !== newRecord.priority)
+          logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
+        if (existing.weight !== newRecord.weight)
+          logger.debug(` - Weight: ${existing.weight} → ${newRecord.weight}`);
+        if (existing.port !== newRecord.port)
+          logger.debug(` - Port: ${existing.port} → ${newRecord.port}`);
         break;
         
       case 'CAA':
-        if (existing.flags !== newRecord.flags ||
-            existing.tag !== newRecord.tag) {
-          logger.trace(`DigitalOceanProvider.recordNeedsUpdate: CAA fields different`);
-          needsUpdate = true;
-        }
+        if (existing.flags !== newRecord.flags)
+          logger.debug(` - Flags: ${existing.flags} → ${newRecord.flags}`);
+        if (existing.tag !== newRecord.tag)
+          logger.debug(` - Tag: ${existing.tag} → ${newRecord.tag}`);
         break;
     }
-    
-    // If an update is needed, log the specific differences at DEBUG level
-    if (needsUpdate && logger.level >= 3) { // DEBUG level or higher
-      logger.debug(`Record ${newRecord.name} needs update:`);
-      if (existingContent !== newContent) 
-        logger.debug(` - Content: ${existingContent} → ${newContent}`);
-      if (existing.ttl !== newRecord.ttl) 
-        logger.debug(` - TTL: ${existing.ttl} → ${newRecord.ttl}`);
-      
-      // Log type-specific field changes
-      switch (newRecord.type) {
-        case 'MX':
-          if (existing.priority !== newRecord.priority)
-            logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
-          break;
-          
-        case 'SRV':
-          if (existing.priority !== newRecord.priority)
-            logger.debug(` - Priority: ${existing.priority} → ${newRecord.priority}`);
-          if (existing.weight !== newRecord.weight)
-            logger.debug(` - Weight: ${existing.weight} → ${newRecord.weight}`);
-          if (existing.port !== newRecord.port)
-            logger.debug(` - Port: ${existing.port} → ${newRecord.port}`);
-          break;
-          
-        case 'CAA':
-          if (existing.flags !== newRecord.flags)
-            logger.debug(` - Flags: ${existing.flags} → ${newRecord.flags}`);
-          if (existing.tag !== newRecord.tag)
-            logger.debug(` - Tag: ${existing.tag} → ${newRecord.tag}`);
-          break;
-      }
-    }
-    
-    logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Final result - needs update: ${needsUpdate}`);
-    return needsUpdate;
   }
+  
+  logger.trace(`DigitalOceanProvider.recordNeedsUpdate: Final result - needs update: ${needsUpdate}`);
+  return needsUpdate;
+ }
 }
 
 module.exports = DigitalOceanProvider;
