@@ -244,7 +244,7 @@ class DNSManager {
     return `${hostname}.${zone}`;
   }
   
-  /**
+    /**
    * Clean up orphaned DNS records
    */
   async cleanupOrphanedRecords(activeHostnames) {
@@ -252,33 +252,74 @@ class DNSManager {
       logger.debug('Checking for orphaned DNS records...');
       
       // Get all DNS records for our zone (from cache when possible)
-      const allRecords = await this.dnsProvider.getRecordsFromCache();
+      const allRecords = await this.dnsProvider.getRecordsFromCache(true); // Force refresh
+      
+      // Normalize active hostnames for comparison
+      const normalizedActiveHostnames = new Set(activeHostnames.map(host => host.toLowerCase()));
+      
+      // Log all active hostnames in trace mode
+      logger.trace(`Active hostnames: ${Array.from(normalizedActiveHostnames).join(', ')}`);
       
       // Find records that were created by this tool but no longer exist in Traefik
-      const orphanedRecords = allRecords.filter(record => {
-        // Skip records that aren't managed by this tool
-        if (record.comment !== 'Managed by Traefik DNS Manager') {
-          return false;
+      const orphanedRecords = [];
+      const domainSuffix = `.${this.config.getProviderDomain()}`;
+      
+      for (const record of allRecords) {
+        // Skip apex domain/root records
+        if (record.name === '@' || record.name === this.config.getProviderDomain()) {
+          logger.debug(`Skipping apex record: ${record.name}`);
+          continue;
         }
         
-        // Check if this record is still active
-        return !activeHostnames.includes(record.name);
-      });
-      
-      // Delete orphaned records
-      for (const record of orphanedRecords) {
-        // Log at INFO level which records are being removed
-        logger.info(`🗑️ Removing orphaned DNS record: ${record.name} (${record.type})`);
-        await this.dnsProvider.deleteRecord(record.id);
+        // Skip records that aren't a subdomain of our managed domain
+        if (record.type === 'NS' || record.type === 'SOA' || record.type === 'CAA') {
+          logger.debug(`Skipping system record: ${record.name} (${record.type})`);
+          continue;
+        }
         
-        // Publish delete event
-        this.eventBus.publish(EventTypes.DNS_RECORD_DELETED, {
-          name: record.name,
-          type: record.type
-        });
+        // Reconstruct the FQDN from DO's record name format
+        let recordFqdn;
+        if (record.name === '@') {
+          recordFqdn = this.config.getProviderDomain();
+        } else {
+          recordFqdn = `${record.name}${domainSuffix}`;
+        }
+        
+        // Normalize for comparison
+        const normalizedRecordFqdn = recordFqdn.toLowerCase();
+        
+        // Check if this record is still active
+        if (!normalizedActiveHostnames.has(normalizedRecordFqdn)) {
+          logger.debug(`Found orphaned record: ${recordFqdn} (${record.type})`);
+          orphanedRecords.push(record);
+        }
       }
       
+      // Delete orphaned records
       if (orphanedRecords.length > 0) {
+        logger.info(`Found ${orphanedRecords.length} orphaned DNS records to clean up`);
+        
+        for (const record of orphanedRecords) {
+          // Format the name for display
+          const displayName = record.name === '@' 
+            ? this.config.getProviderDomain() 
+            : `${record.name}.${this.config.getProviderDomain()}`;
+            
+          logger.info(`🗑️ Removing orphaned DNS record: ${displayName} (${record.type})`);
+          
+          try {
+            await this.dnsProvider.deleteRecord(record.id);
+            
+            // Publish delete event
+            this.eventBus.publish(EventTypes.DNS_RECORD_DELETED, {
+              name: displayName,
+              type: record.type
+            });
+          } catch (error) {
+            logger.error(`Error deleting orphaned record ${displayName}: ${error.message}`);
+          }
+        }
+        
         logger.success(`Removed ${orphanedRecords.length} orphaned DNS records`);
       } else {
         logger.debug('No orphaned DNS records found');
