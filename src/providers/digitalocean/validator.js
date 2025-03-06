@@ -135,10 +135,10 @@ function validateRecord(record) {
   
   // DigitalOcean-specific validations
   
-  // Remove 'proxied' property if present (DigitalOcean doesn't support proxying)
+  // Silently remove 'proxied' property if present since DigitalOcean doesn't support proxying
   if (record.proxied !== undefined) {
-    logger.warn(`'proxied' setting is being ignored for DigitalOcean records. DigitalOcean does not support proxying.`);
     delete record.proxied;
+    logger.trace(`digitalocean.validator: Removed 'proxied' property as DigitalOcean doesn't support it`);
   }
   
   // DigitalOcean requires TTL to be at least 30 seconds
