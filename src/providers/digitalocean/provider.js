@@ -354,6 +354,42 @@ class DigitalOceanProvider extends DNSProvider {
       // Convert name format for DO - extract subdomain part
       const recordData = this.prepareRecordForCreation(record);
       
+      // First check if record already exists to avoid duplicates
+      logger.debug(`Checking if record ${recordData.name} (${recordData.type}) already exists...`);
+      
+      try {
+        // Try searching by name and type directly from API
+        const response = await this.client.get(`/domains/${this.domain}/records`, {
+          params: { name: recordData.name, type: recordData.type }
+        });
+        
+        const existingRecords = response.data.domain_records || [];
+        
+        if (existingRecords.length > 0) {
+          const existing = existingRecords[0];
+          logger.info(`Found existing ${record.type} record for ${record.name}, no need to create`);
+          
+          // Update the cache
+          this.updateRecordInCache(existing);
+          
+          // Check if it needs to be updated
+          if (existing.data !== recordData.data || existing.ttl !== recordData.ttl) {
+            logger.info(`Updating existing ${record.type} record for ${record.name}`);
+            return await this.updateRecord(existing.id, record);
+          }
+          
+          // Record is already up to date
+          if (global.statsCounter) {
+            global.statsCounter.upToDate++;
+          }
+          
+          return existing;
+        }
+      } catch (searchError) {
+        // If search fails, continue with creation attempt
+        logger.debug(`Error searching for existing record: ${searchError.message}`);
+      }
+      
       // Convert to DigitalOcean format
       const doRecord = convertToDigitalOceanFormat(recordData);
       
@@ -391,6 +427,37 @@ class DigitalOceanProvider extends DNSProvider {
           // Special handling for 422 errors (validation failures)
           if (statusCode === 422) {
             logger.error(`DigitalOcean API validation error: ${JSON.stringify(responseData)}`);
+            
+            // Check for "CNAME records cannot share a name with other records" error
+            if (responseData.message && responseData.message.includes("CNAME records cannot share a name")) {
+              logger.warn(`Record ${record.name} already exists with a different type. Skipping creation.`);
+              
+              // Try to find the existing record of any type for this name
+              try {
+                const allRecordsResponse = await this.client.get(`/domains/${this.domain}/records`, {
+                  params: { name: recordData.name }
+                });
+                
+                const allExistingRecords = allRecordsResponse.data.domain_records || [];
+                
+                if (allExistingRecords.length > 0) {
+                  const existingRecord = allExistingRecords[0];
+                  logger.info(`Found existing record for ${record.name} of type ${existingRecord.type}`);
+                  
+                  // Update stats
+                  if (global.statsCounter) {
+                    global.statsCounter.upToDate++;
+                  }
+                  
+                  // Update the cache
+                  this.updateRecordInCache(existingRecord);
+                  
+                  return existingRecord;
+                }
+              } catch (findError) {
+                logger.debug(`Error finding existing records: ${findError.message}`);
+              }
+            }
             
             // Check for common errors
             const isApexDomain = record.name === this.domain || recordData.name === '@';
@@ -753,12 +820,25 @@ async handleApexDomain(record) {
         apex: [] // Special handling for apex domains
       };
       
+      // Keep track of processed hostnames to avoid duplicates
+      const processedHostnames = new Set();
+      
       // First pass: examine all records and sort into categories
       logger.trace('DigitalOceanProvider.batchEnsureRecords: First pass - examining records');
       
       for (const recordConfig of recordConfigs) {
         try {
           logger.trace(`DigitalOceanProvider.batchEnsureRecords: Processing record ${recordConfig.name} (${recordConfig.type})`);
+          
+          // Check if we've already processed this hostname+type combination
+          const recordKey = `${recordConfig.type}-${recordConfig.name}`;
+          if (processedHostnames.has(recordKey)) {
+            logger.debug(`Skipping duplicate record: ${recordConfig.name} (${recordConfig.type})`);
+            continue;
+          }
+          
+          // Mark this hostname+type as processed
+          processedHostnames.add(recordKey);
           
           // Handle apex domains that need IP lookup
           if ((recordConfig.needsIpLookup || recordConfig.content === 'pending') && recordConfig.type === 'A') {
@@ -785,6 +865,28 @@ async handleApexDomain(record) {
           const isApex = recordConfig.name === this.domain;
           
           if (isApex) {
+            // Before adding to apex list, check cached apex record from previous run
+            if (this.lastApexRecord && this.lastApexRecord.type === recordConfig.type) {
+              // If apex hasn't changed, mark as unchanged and skip special handling
+              if (this.lastApexRecord.data === recordConfig.content && 
+                  this.lastApexRecord.ttl === recordConfig.ttl) {
+                logger.debug(`Apex domain record unchanged from previous run: ${recordConfig.name}`);
+                pendingChanges.unchanged.push({
+                  record: recordConfig,
+                  existing: this.lastApexRecord
+                });
+                
+                // Update stats counter if available
+                if (global.statsCounter) {
+                  global.statsCounter.upToDate++;
+                }
+                
+                // Add to results and continue to next record
+                results.push(this.lastApexRecord);
+                continue;
+              }
+            }
+            
             logger.debug(`Detected apex domain record: ${recordConfig.name}`);
             pendingChanges.apex.push({
               record: recordConfig
@@ -813,7 +915,7 @@ async handleApexDomain(record) {
                 record: recordConfig,
                 existing
               });
-
+              
               // Update stats counter if available
               if (global.statsCounter) {
                 global.statsCounter.upToDate++;
@@ -850,6 +952,9 @@ async handleApexDomain(record) {
           logger.info(`🌐 Processing apex domain record for ${record.name}`);
           const result = await this.handleApexDomain(record);
           results.push(result);
+          
+          // Store the last apex record to avoid unnecessary processing in future runs
+          this.lastApexRecord = result;
         } catch (error) {
           logger.error(`Failed to handle apex domain ${record.name}: ${error.message}`);
           logger.trace(`DigitalOceanProvider.batchEnsureRecords: Apex domain error: ${error.message}`);
