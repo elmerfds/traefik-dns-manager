@@ -6,12 +6,16 @@ const { DNSProviderFactory } = require('../providers');
 const logger = require('../utils/logger');
 const EventTypes = require('../events/EventTypes');
 const { extractDnsConfigFromLabels } = require('../utils/dns');
+const RecordTracker = require('../utils/recordTracker');
 
 class DNSManager {
   constructor(config, eventBus) {
     this.config = config;
     this.eventBus = eventBus;
     this.dnsProvider = DNSProviderFactory.createProvider(config);
+    
+    // Initialize record tracker
+    this.recordTracker = new RecordTracker(config);
     
     // Initialize counters for statistics
     this.stats = {
@@ -146,7 +150,26 @@ class DNSManager {
       // Batch process all DNS records
       if (dnsRecordConfigs.length > 0) {
         logger.debug(`Batch processing ${dnsRecordConfigs.length} DNS record configurations`);
-        await this.dnsProvider.batchEnsureRecords(dnsRecordConfigs);
+        const processedRecords = await this.dnsProvider.batchEnsureRecords(dnsRecordConfigs);
+        
+        // Track all created/updated records
+        if (processedRecords && processedRecords.length > 0) {
+          for (const record of processedRecords) {
+            // Only track records that have an ID (successfully created/updated)
+            if (record && record.id) {
+              // Check if this is a new record or just an update
+              const isTracked = this.recordTracker.isTracked(record);
+              
+              if (isTracked) {
+                // Update the tracked record with the latest ID
+                this.recordTracker.updateRecordId(record, record);
+              } else {
+                // Track new record
+                this.recordTracker.trackRecord(record);
+              }
+            }
+          }
+        }
       }
       
       // Log summary stats if we have records
@@ -278,6 +301,21 @@ class DNSManager {
           continue;
         }
         
+        // Check if this record is tracked by our tool
+        if (!this.recordTracker.isTracked(record)) {
+          // Support legacy records with comment for backward compatibility
+          if (this.config.dnsProvider === 'cloudflare' && record.comment === 'Managed by Traefik DNS Manager') {
+            // This is a legacy record created before we implemented tracking
+            // Add it to our tracker for future reference
+            logger.debug(`Found legacy managed record with comment: ${record.name} (${record.type})`);
+            this.recordTracker.trackRecord(record);
+          } else {
+            // Not tracked and not a legacy record - skip it
+            logger.debug(`Skipping non-managed record: ${record.name} (${record.type})`);
+            continue;
+          }
+        }
+        
         // Reconstruct the FQDN from record name format
         let recordFqdn;
         if (record.name === '@') {
@@ -329,6 +367,9 @@ class DNSManager {
           
           try {
             await this.dnsProvider.deleteRecord(record.id);
+            
+            // Remove record from tracker
+            this.recordTracker.untrackRecord(record);
             
             // Publish delete event
             this.eventBus.publish(EventTypes.DNS_RECORD_DELETED, {
