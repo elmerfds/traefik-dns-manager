@@ -343,6 +343,12 @@ class DNSManager {
         // Log each record for debugging
         logger.debug(`Checking record FQDN: ${recordFqdn} (${record.type})`);
         
+        // Check if this record should be preserved
+        if (this.recordTracker.shouldPreserveHostname(recordFqdn)) {
+          logger.info(`Preserving DNS record (in preserved list): ${recordFqdn} (${record.type})`);
+          continue;
+        }
+        
         // Check if this record is still active
         if (!normalizedActiveHostnames.has(recordFqdn)) {
           logger.debug(`Found orphaned record: ${recordFqdn} (${record.type})`);

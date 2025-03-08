@@ -15,8 +15,36 @@ class RecordTracker {
     this.providerDomain = config.getProviderDomain();
     this.provider = config.dnsProvider;
     
+    // Load preserved hostnames from config
+    this.loadPreservedHostnames();
+    
     // Initialize the tracker
     this.loadTrackedRecords();
+  }
+  
+  /**
+   * Load preserved hostnames from environment variable
+   */
+  loadPreservedHostnames() {
+    try {
+      const preservedHostnamesStr = process.env.PRESERVED_HOSTNAMES || '';
+      
+      // Split by comma and trim each hostname
+      this.preservedHostnames = preservedHostnamesStr
+        .split(',')
+        .map(hostname => hostname.trim())
+        .filter(hostname => hostname.length > 0);
+      
+      if (this.preservedHostnames.length > 0) {
+        logger.info(`Loaded ${this.preservedHostnames.length} preserved hostnames: ${this.preservedHostnames.join(', ')}`);
+      } else {
+        logger.debug('No preserved hostnames configured');
+        this.preservedHostnames = [];
+      }
+    } catch (error) {
+      logger.error(`Error loading preserved hostnames: ${error.message}`);
+      this.preservedHostnames = [];
+    }
   }
   
   /**
@@ -153,6 +181,36 @@ class RecordTracker {
     }
     
     return records;
+  }
+  
+  /**
+   * Check if a hostname is in the preserved list
+   * @param {string} hostname - The hostname to check
+   * @returns {boolean} - True if the hostname should be preserved
+   */
+  shouldPreserveHostname(hostname) {
+    // Normalize hostname for comparison (trim, lowercase)
+    const normalizedHostname = hostname.trim().toLowerCase();
+    
+    // Check exact match
+    if (this.preservedHostnames.some(h => h.toLowerCase() === normalizedHostname)) {
+      logger.debug(`Hostname ${hostname} is in the preserved list (exact match)`);
+      return true;
+    }
+    
+    // Check for wildcard match (*.example.com)
+    for (const preservedHostname of this.preservedHostnames) {
+      if (preservedHostname.startsWith('*.')) {
+        const wildcardDomain = preservedHostname.substring(2).toLowerCase();
+        if (normalizedHostname.endsWith(wildcardDomain) && 
+            normalizedHostname.length > wildcardDomain.length) {
+          logger.debug(`Hostname ${hostname} matched wildcard pattern ${preservedHostname}`);
+          return true;
+        }
+      }
+    }
+    
+    return false;
   }
   
   /**
