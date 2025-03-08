@@ -18,7 +18,7 @@ class RecordTracker {
     // Load preserved hostnames from config
     this.loadPreservedHostnames();
     
-    // Initialize the tracker
+    // Initialise the tracker
     this.loadTrackedRecords();
   }
   

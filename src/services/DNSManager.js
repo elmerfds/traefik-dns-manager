@@ -14,10 +14,10 @@ class DNSManager {
     this.eventBus = eventBus;
     this.dnsProvider = DNSProviderFactory.createProvider(config);
     
-    // Initialize record tracker
+    // Initialise record tracker
     this.recordTracker = new RecordTracker(config);
     
-    // Initialize counters for statistics
+    // Initialise counters for statistics
     this.stats = {
       created: 0,
       updated: 0,
@@ -36,16 +36,16 @@ class DNSManager {
   }
   
   /**
-   * Initialize the DNS Manager
+   * Initialise the DNS Manager
    */
   async init() {
     try {
       logger.debug('Initializing DNS Manager...');
       await this.dnsProvider.init();
-      logger.success('DNS Manager initialized successfully');
+      logger.success('DNS Manager Initialised successfully');
       return true;
     } catch (error) {
-      logger.error(`Failed to initialize DNS Manager: ${error.message}`);
+      logger.error(`Failed to Initialise DNS Manager: ${error.message}`);
       throw error;
     }
   }
@@ -304,9 +304,10 @@ class DNSManager {
         // Check if this record is tracked by our tool
         if (!this.recordTracker.isTracked(record)) {
           // Support legacy records with comment for backward compatibility
-          if (this.config.dnsProvider === 'cloudflare' && record.comment === 'Managed by Traefik DNS Manager') {
+          if (this.config.dnsProvider === 'cloudflare' && 
+              (record.comment === 'Managed by Traefik DNS Manager' || 
+               record.comment === 'Managed by TráfegoDNS')) {
             // This is a legacy record created before we implemented tracking
-            // Add it to our tracker for future reference
             logger.debug(`Found legacy managed record with comment: ${record.name} (${record.type})`);
             this.recordTracker.trackRecord(record);
           } else {

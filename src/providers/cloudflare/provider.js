@@ -252,7 +252,7 @@ class CloudflareProvider extends DNSProvider {
       // Add management comment
       const recordWithComment = {
         ...record,
-        comment: 'Managed by Traefik DNS Manager'
+        comment: 'Managed by TráfegoDNS'
       };
       
       // Convert to Cloudflare format if needed

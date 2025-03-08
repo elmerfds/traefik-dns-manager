@@ -1,7 +1,7 @@
-# TraeDnsManager
+# TráfegoDNS
 
 <div align="center">
-  <img src="logo.svg" alt="TraeDnsManager Logo" width="200" height="200">
+  <img src="logo.svg" alt="TráfegoDNS Logo" width="200" height="200">
 </div>
 
 A service that automatically manages DNS records based on Traefik routing configuration.
@@ -420,12 +420,12 @@ The default level is `INFO`, which provides a clean, readable output with import
 ### INFO Level Format
 
 ```
-✅ Starting TraeDnsManager
+✅ Starting TráfegoDNS
 ℹ️ Cloudflare Zone: example.com
 ℹ️ Processing 30 hostnames for DNS management
 ✅ Created A record for example.com
 ℹ️ 29 DNS records are up to date
-✅ TraeDnsManager running successfully
+✅ TráfegoDNS running successfully
 ```
 
 ## Performance Optimisation
