@@ -6,12 +6,16 @@ const { DNSProviderFactory } = require('../providers');
 const logger = require('../utils/logger');
 const EventTypes = require('../events/EventTypes');
 const { extractDnsConfigFromLabels } = require('../utils/dns');
+const RecordTracker = require('../utils/recordTracker');
 
 class DNSManager {
   constructor(config, eventBus) {
     this.config = config;
     this.eventBus = eventBus;
     this.dnsProvider = DNSProviderFactory.createProvider(config);
+    
+    // Initialize record tracker
+    this.recordTracker = new RecordTracker(config);
     
     // Initialize counters for statistics
     this.stats = {
@@ -146,7 +150,26 @@ class DNSManager {
       // Batch process all DNS records
       if (dnsRecordConfigs.length > 0) {
         logger.debug(`Batch processing ${dnsRecordConfigs.length} DNS record configurations`);
-        await this.dnsProvider.batchEnsureRecords(dnsRecordConfigs);
+        const processedRecords = await this.dnsProvider.batchEnsureRecords(dnsRecordConfigs);
+        
+        // Track all created/updated records
+        if (processedRecords && processedRecords.length > 0) {
+          for (const record of processedRecords) {
+            // Only track records that have an ID (successfully created/updated)
+            if (record && record.id) {
+              // Check if this is a new record or just an update
+              const isTracked = this.recordTracker.isTracked(record);
+              
+              if (isTracked) {
+                // Update the tracked record with the latest ID
+                this.recordTracker.updateRecordId(record, record);
+              } else {
+                // Track new record
+                this.recordTracker.trackRecord(record);
+              }
+            }
+          }
+        }
       }
       
       // Log summary stats if we have records
@@ -244,7 +267,7 @@ class DNSManager {
     return `${hostname}.${zone}`;
   }
   
-    /**
+  /**
    * Clean up orphaned DNS records
    */
   async cleanupOrphanedRecords(activeHostnames) {
@@ -263,6 +286,7 @@ class DNSManager {
       // Find records that were created by this tool but no longer exist in Traefik
       const orphanedRecords = [];
       const domainSuffix = `.${this.config.getProviderDomain()}`;
+      const domainName = this.config.getProviderDomain().toLowerCase();
       
       for (const record of allRecords) {
         // Skip apex domain/root records
@@ -277,21 +301,55 @@ class DNSManager {
           continue;
         }
         
-        // Reconstruct the FQDN from DO's record name format
-        let recordFqdn;
-        if (record.name === '@') {
-          recordFqdn = this.config.getProviderDomain();
-        } else {
-          recordFqdn = `${record.name}${domainSuffix}`;
+        // Check if this record is tracked by our tool
+        if (!this.recordTracker.isTracked(record)) {
+          // Support legacy records with comment for backward compatibility
+          if (this.config.dnsProvider === 'cloudflare' && record.comment === 'Managed by Traefik DNS Manager') {
+            // This is a legacy record created before we implemented tracking
+            // Add it to our tracker for future reference
+            logger.debug(`Found legacy managed record with comment: ${record.name} (${record.type})`);
+            this.recordTracker.trackRecord(record);
+          } else {
+            // Not tracked and not a legacy record - skip it
+            logger.debug(`Skipping non-managed record: ${record.name} (${record.type})`);
+            continue;
+          }
         }
         
-        // Normalize for comparison
-        const normalizedRecordFqdn = recordFqdn.toLowerCase();
+        // Reconstruct the FQDN from record name format
+        let recordFqdn;
+        if (record.name === '@') {
+          recordFqdn = domainName;
+        } else {
+          // Check if the record name already contains the domain
+          const recordName = record.name.toLowerCase();
+          if (recordName.endsWith(domainName)) {
+            // Already has domain name, use as is
+            recordFqdn = recordName;
+          } else {
+            // Need to append domain
+            recordFqdn = `${recordName}${domainSuffix}`;
+          }
+        }
+        
+        // Check for domain duplication (e.g., example.com.example.com)
+        const doublePattern = new RegExp(`${domainName}\\.${domainName}$`, 'i');
+        if (doublePattern.test(recordFqdn)) {
+          // Remove the duplicated domain part
+          recordFqdn = recordFqdn.replace(doublePattern, domainName);
+          logger.debug(`Fixed duplicated domain in record: ${recordFqdn}`);
+        }
+        
+        // Log each record for debugging
+        logger.debug(`Checking record FQDN: ${recordFqdn} (${record.type})`);
         
         // Check if this record is still active
-        if (!normalizedActiveHostnames.has(normalizedRecordFqdn)) {
+        if (!normalizedActiveHostnames.has(recordFqdn)) {
           logger.debug(`Found orphaned record: ${recordFqdn} (${record.type})`);
-          orphanedRecords.push(record);
+          orphanedRecords.push({
+            ...record,
+            displayName: recordFqdn // Save the normalized display name
+          });
         }
       }
       
@@ -300,15 +358,18 @@ class DNSManager {
         logger.info(`Found ${orphanedRecords.length} orphaned DNS records to clean up`);
         
         for (const record of orphanedRecords) {
-          // Format the name for display
-          const displayName = record.name === '@' 
-            ? this.config.getProviderDomain() 
-            : `${record.name}.${this.config.getProviderDomain()}`;
-            
+          // Use the saved display name for logging
+          const displayName = record.displayName || 
+                             (record.name === '@' ? this.config.getProviderDomain() 
+                                                 : `${record.name}.${this.config.getProviderDomain()}`);
+                             
           logger.info(`🗑️ Removing orphaned DNS record: ${displayName} (${record.type})`);
           
           try {
             await this.dnsProvider.deleteRecord(record.id);
+            
+            // Remove record from tracker
+            this.recordTracker.untrackRecord(record);
             
             // Publish delete event
             this.eventBus.publish(EventTypes.DNS_RECORD_DELETED, {
