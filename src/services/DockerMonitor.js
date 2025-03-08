@@ -81,8 +81,39 @@ class DockerMonitor {
     
     this.events.on('data', (data) => {
       try {
-        const event = JSON.parse(data.toString());
+        // More robust JSON parsing with fallbacks
+        let event;
+        const rawData = data.toString();
         
+        try {
+          // First attempt: Standard parsing
+          event = JSON.parse(rawData);
+        } catch (parseError) {
+          logger.debug(`Initial JSON parse failed: ${parseError.message}. Attempting cleanup...`);
+          
+          try {
+            // Second attempt: Trim and sanitize common control characters
+            const sanitizedData = rawData.trim().replace(/[\u0000-\u0019]+/g, "");
+            event = JSON.parse(sanitizedData);
+            logger.debug('Parsed JSON after basic sanitization');
+          } catch (sanitizeError) {
+            // Third attempt: Try to find and parse valid JSON within the stream
+            try {
+              // Look for something that might be a complete JSON object
+              const match = rawData.match(/\{.*\}/);
+              if (match) {
+                event = JSON.parse(match[0]);
+                logger.debug('Parsed JSON after extracting from stream');
+              } else {
+                throw new Error(`Could not extract valid JSON: ${sanitizeError.message}`);
+              }
+            } catch (extractError) {
+              throw new Error(`Failed to parse Docker event: ${parseError.message}`);
+            }
+          }
+        }
+        
+        // Now that we have a valid event object, process it
         if (
           event.Type === 'container' && 
           ['start', 'stop', 'die', 'destroy'].includes(event.status)
@@ -126,6 +157,8 @@ class DockerMonitor {
         }
       } catch (error) {
         logger.error(`Error processing Docker event: ${error.message}`);
+        // Log additional debug info but avoid logging sensitive data
+        logger.debug(`Event data type: ${typeof data}, length: ${data ? data.length : 0}`);
       }
     });
     
