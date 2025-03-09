@@ -80,7 +80,7 @@ class StatusReporter {
       const version = packageJson.version || '1.0.0';
       
       console.log(''); // Empty line for better readability
-      logger.info(`🚀 TRAEFIK DNS MANAGER v${version}`);
+      logger.info(`🚀 TráfegoDNS v${version}`);
       console.log(''); // Empty line for spacing
       
       // DNS Provider Section
