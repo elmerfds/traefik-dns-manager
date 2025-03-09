@@ -67,7 +67,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            ${{ secrets.DOCKER_USERNAME }}/traefik-dns-manager
+            ${{ secrets.DOCKER_USERNAME }}/TrafegoDNS
             ghcr.io/${{ github.repository }}
           tags: |
             # Latest tag for main/master
@@ -85,7 +85,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            ${{ secrets.DOCKER_USERNAME }}/traefik-dns-manager
+            ${{ secrets.DOCKER_USERNAME }}/TrafegoDNS
             ghcr.io/${{ github.repository }}
           tags: |
             # Dev tag
