@@ -5,7 +5,11 @@ const logger = require('../../utils/logger');
 
 /**
  * Validate a Route53 DNS record configuration
- * @param {Object} record - The record to validate
+ * @param {Object}
+
+module.exports = {
+  validateRecord
+}; record - The record to validate
  * @throws {Error} - If validation fails
  */
 function validateRecord(record) {
