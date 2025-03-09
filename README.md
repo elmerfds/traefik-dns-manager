@@ -239,7 +239,7 @@ Different DNS providers have different requirements for TTL values:
 |----------|-------------|-------------|-------|
 | Cloudflare | 1 second | 1 second (Auto) | TTL is ignored for proxied records (always Auto) |
 | DigitalOcean | 30 seconds | 30 seconds | Values below 30 are automatically adjusted to 30 |
-| Route53 | 60 seconds | 300 seconds | Values below 60 are automatically adjusted to 60 |
+| Route53 | 60 seconds | 60 seconds | Values below 60 are automatically adjusted to 60 |
 
 ## Usage Examples
 
