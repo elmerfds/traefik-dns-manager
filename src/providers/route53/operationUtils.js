@@ -7,7 +7,7 @@ const { convertToRoute53Format } = require('./converter');
 const { validateRecord } = require('./validator');
 
 /**
- * Analyze a Route53 batch operation error and categorize it
+ * Analyse a Route53 batch operation error and categorize it
  * @param {Error} error - The error object from AWS API
  * @returns {Object} - Categorized error information with affected records
  */
