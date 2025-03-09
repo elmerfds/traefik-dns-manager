@@ -277,249 +277,329 @@ async function deleteRecord(id) {
  * Route53 supports batching changes in a single API call, which is more efficient
  */
 async function batchEnsureRecords(recordConfigs) {
-  if (!recordConfigs || recordConfigs.length === 0) {
-    logger.trace('Route53Provider.batchEnsureRecords: No record configs provided, skipping');
-    return [];
-  }
-  
-  logger.debug(`Batch processing ${recordConfigs.length} DNS records`);
-  logger.trace(`Route53Provider.batchEnsureRecords: Starting batch processing of ${recordConfigs.length} records`);
-  
-  try {
-    // Refresh cache if needed
-    await this.getRecordsFromCache();
+    if (!recordConfigs || recordConfigs.length === 0) {
+      logger.trace('Route53Provider.batchEnsureRecords: No record configs provided, skipping');
+      return [];
+    }
     
-    // Process each record configuration
-    const results = [];
-    const pendingChanges = {
-      create: [],
-      update: [],
-      unchanged: []
-    };
+    logger.debug(`Batch processing ${recordConfigs.length} DNS records`);
+    logger.trace(`Route53Provider.batchEnsureRecords: Starting batch processing of ${recordConfigs.length} records`);
     
-    // First pass: examine all records and sort into categories
-    logger.trace('Route53Provider.batchEnsureRecords: First pass - examining records');
-    
-    for (const recordConfig of recordConfigs) {
-      try {
-        logger.trace(`Route53Provider.batchEnsureRecords: Processing record ${recordConfig.name} (${recordConfig.type})`);
-        
-        // Skip records with proxied flag (Route53 doesn't support proxying)
-        if (recordConfig.proxied !== undefined) {
-          logger.debug(`Route53 doesn't support proxying, ignoring proxied flag for ${recordConfig.name}`);
-          delete recordConfig.proxied;
-        }
-        
-        // Handle apex domains that need IP lookup
-        if ((recordConfig.needsIpLookup || recordConfig.content === 'pending') && recordConfig.type === 'A') {
-          logger.trace(`Route53Provider.batchEnsureRecords: Record needs IP lookup: ${recordConfig.name}`);
+    try {
+      // Refresh cache if needed
+      await this.getRecordsFromCache();
+      
+      // Process each record configuration
+      const results = [];
+      const pendingChanges = {
+        create: [],
+        update: [],
+        unchanged: []
+      };
+      
+      // First pass: examine all records and sort into categories
+      logger.trace('Route53Provider.batchEnsureRecords: First pass - examining records');
+      
+      for (const recordConfig of recordConfigs) {
+        try {
+          logger.trace(`Route53Provider.batchEnsureRecords: Processing record ${recordConfig.name} (${recordConfig.type})`);
           
-          // Get public IP asynchronously
-          const ip = await this.config.getPublicIP();
-          if (ip) {
-            logger.trace(`Route53Provider.batchEnsureRecords: Retrieved IP address: ${ip}`);
-            recordConfig.content = ip;
-            logger.debug(`Retrieved public IP for apex domain ${recordConfig.name}: ${ip}`);
-          } else {
-            logger.trace(`Route53Provider.batchEnsureRecords: Failed to retrieve IP address`);
-            throw new Error(`Unable to determine public IP for apex domain A record: ${recordConfig.name}`);
+          // Skip records with proxied flag (Route53 doesn't support proxying)
+          if (recordConfig.proxied !== undefined) {
+            logger.debug(`Route53 doesn't support proxying, ignoring proxied flag for ${recordConfig.name}`);
+            delete recordConfig.proxied;
           }
-          // Remove the flag to avoid confusion
-          delete recordConfig.needsIpLookup;
-        }
-        
-        // Validate the record
-        validateRecord(recordConfig);
-        
-        // Ensure record name is properly formatted for Route53 (always ends with dot)
-        if (!recordConfig.name.endsWith('.')) {
-          // Append the zone name if not already present
-          if (!recordConfig.name.endsWith(this.zone)) {
-            // For apex domain
-            if (recordConfig.name === this.zone.replace(/\.$/, '')) {
-              recordConfig.name = this.zone.endsWith('.') ? this.zone : `${this.zone}.`;
-            } else {
-              // For subdomains
-              const zoneName = this.zone.endsWith('.') ? this.zone : `${this.zone}.`;
-              recordConfig.name = `${recordConfig.name}.${zoneName}`;
-            }
-          } else {
-            // Already has the zone but missing the trailing dot
-            recordConfig.name = `${recordConfig.name}.`;
-          }
-        }
-        
-        // Find existing record in cache
-        const existing = this.findRecordInCache(recordConfig.type, recordConfig.name);
-        
-        if (existing) {
-          logger.trace(`Route53Provider.batchEnsureRecords: Found existing record name=${existing.name}`);
           
-          // Check if update is needed
-          const needsUpdate = this.recordNeedsUpdate(existing, recordConfig);
-          logger.trace(`Route53Provider.batchEnsureRecords: Record ${recordConfig.name} needs update: ${needsUpdate}`);
-          
-          if (needsUpdate) {
-            pendingChanges.update.push({
-              id: existing.id,
-              record: recordConfig,
-              existing
-            });
-          } else {
-            pendingChanges.unchanged.push({
-              record: recordConfig,
-              existing
-            });
+          // Handle apex domains that need IP lookup
+          if ((recordConfig.needsIpLookup || recordConfig.content === 'pending') && recordConfig.type === 'A') {
+            logger.trace(`Route53Provider.batchEnsureRecords: Record needs IP lookup: ${recordConfig.name}`);
             
-            // Update stats counter if available
-            if (global.statsCounter) {
-              global.statsCounter.upToDate++;
-              logger.trace(`Route53Provider.batchEnsureRecords: Incremented global.statsCounter.upToDate to ${global.statsCounter.upToDate}`);
+            // Get public IP asynchronously
+            const ip = await this.config.getPublicIP();
+            if (ip) {
+              logger.trace(`Route53Provider.batchEnsureRecords: Retrieved IP address: ${ip}`);
+              recordConfig.content = ip;
+              logger.debug(`Retrieved public IP for apex domain ${recordConfig.name}: ${ip}`);
+            } else {
+              logger.trace(`Route53Provider.batchEnsureRecords: Failed to retrieve IP address`);
+              throw new Error(`Unable to determine public IP for apex domain A record: ${recordConfig.name}`);
+            }
+            // Remove the flag to avoid confusion
+            delete recordConfig.needsIpLookup;
+          }
+          
+          // Validate the record
+          validateRecord(recordConfig);
+          
+          // Ensure record name is properly formatted for Route53 (always ends with dot)
+          if (!recordConfig.name.endsWith('.')) {
+            // Append the zone name if not already present
+            if (!recordConfig.name.endsWith(this.zone)) {
+              // For apex domain
+              if (recordConfig.name === this.zone.replace(/\.$/, '')) {
+                recordConfig.name = this.zone.endsWith('.') ? this.zone : `${this.zone}.`;
+              } else {
+                // For subdomains
+                const zoneName = this.zone.endsWith('.') ? this.zone : `${this.zone}.`;
+                recordConfig.name = `${recordConfig.name}.${zoneName}`;
+              }
+            } else {
+              // Already has the zone but missing the trailing dot
+              recordConfig.name = `${recordConfig.name}.`;
             }
           }
-        } else {
-          logger.trace(`Route53Provider.batchEnsureRecords: No existing record found, needs creation`);
           
-          // Need to create a new record
-          pendingChanges.create.push({
-            record: recordConfig
+          // Find existing record in cache
+          const existing = this.findRecordInCache(recordConfig.type, recordConfig.name);
+          
+          if (existing) {
+            logger.trace(`Route53Provider.batchEnsureRecords: Found existing record name=${existing.name}`);
+            
+            // Check if update is needed
+            const needsUpdate = this.recordNeedsUpdate(existing, recordConfig);
+            logger.trace(`Route53Provider.batchEnsureRecords: Record ${recordConfig.name} needs update: ${needsUpdate}`);
+            
+            if (needsUpdate) {
+              pendingChanges.update.push({
+                id: existing.id,
+                record: recordConfig,
+                existing
+              });
+            } else {
+              pendingChanges.unchanged.push({
+                record: recordConfig,
+                existing
+              });
+              
+              // Update stats counter if available
+              if (global.statsCounter) {
+                global.statsCounter.upToDate++;
+                logger.trace(`Route53Provider.batchEnsureRecords: Incremented global.statsCounter.upToDate to ${global.statsCounter.upToDate}`);
+              }
+            }
+          } else {
+            logger.trace(`Route53Provider.batchEnsureRecords: No existing record found, needs creation`);
+            
+            // Need to create a new record
+            pendingChanges.create.push({
+              record: recordConfig
+            });
+          }
+        } catch (error) {
+          logger.error(`Error processing ${recordConfig.name}: ${error.message}`);
+          logger.trace(`Route53Provider.batchEnsureRecords: Error details: ${error.message}`);
+          
+          if (global.statsCounter) {
+            global.statsCounter.errors++;
+            logger.trace(`Route53Provider.batchEnsureRecords: Incremented global.statsCounter.errors to ${global.statsCounter.errors}`);
+          }
+        }
+      }
+      
+      // Second pass: apply all changes
+      logger.debug(`DNS changes: ${pendingChanges.create.length} to create, ${pendingChanges.update.length} to update, ${pendingChanges.unchanged.length} unchanged`);
+      logger.trace('Route53Provider.batchEnsureRecords: Second pass - applying changes');
+      
+      let batchSucceeded = true;
+      
+      // For Route53, we can batch multiple changes in a single API call
+      // But we need to be careful not to exceed AWS API limits (max 1000 changes per batch)
+      const MAX_CHANGES_PER_BATCH = 100; // Set conservatively below Route53's limit
+      
+      // Process creates and updates in batches
+      if (pendingChanges.create.length > 0 || pendingChanges.update.length > 0) {
+        // Combine all creates and updates into a single array of changes
+        const allChanges = [];
+        
+        // Add creates
+        for (const { record } of pendingChanges.create) {
+          allChanges.push({
+            Action: 'CREATE',
+            ResourceRecordSet: convertToRoute53Format(record, this.zone)
           });
         }
-      } catch (error) {
-        logger.error(`Error processing ${recordConfig.name}: ${error.message}`);
-        logger.trace(`Route53Provider.batchEnsureRecords: Error details: ${error.message}`);
-        
-        if (global.statsCounter) {
-          global.statsCounter.errors++;
-          logger.trace(`Route53Provider.batchEnsureRecords: Incremented global.statsCounter.errors to ${global.statsCounter.errors}`);
+  
+        // Add updates (which are DELETE + CREATE in Route53)
+        for (const { existing, record } of pendingChanges.update) {
+          // Need to delete the old record first
+          allChanges.push({
+            Action: 'DELETE',
+            ResourceRecordSet: convertToRoute53Format(existing, this.zone)
+          });
+          
+          // Then create the new version
+          allChanges.push({
+            Action: 'CREATE',
+            ResourceRecordSet: convertToRoute53Format(record, this.zone)
+          });
         }
-      }
-    }
-    
-    // Second pass: apply all changes
-    logger.debug(`DNS changes: ${pendingChanges.create.length} to create, ${pendingChanges.update.length} to update, ${pendingChanges.unchanged.length} unchanged`);
-    logger.trace('Route53Provider.batchEnsureRecords: Second pass - applying changes');
-    
-    // For Route53, we can batch multiple changes in a single API call
-    // But we need to be careful not to exceed AWS API limits (max 1000 changes per batch)
-    const MAX_CHANGES_PER_BATCH = 100; // Set conservatively below Route53's limit
-    
-    // Process creates and updates in batches
-    if (pendingChanges.create.length > 0 || pendingChanges.update.length > 0) {
-      // Combine all creates and updates into a single array of changes
-      const allChanges = [];
-      
-      // Add creates
-      for (const { record } of pendingChanges.create) {
-        allChanges.push({
-          Action: 'CREATE',
-          ResourceRecordSet: convertToRoute53Format(record, this.zone)
-        });
-      }
-
-      // Add updates (which are DELETE + CREATE in Route53)
-      for (const { existing, record } of pendingChanges.update) {
-        // Need to delete the old record first
-        allChanges.push({
-          Action: 'DELETE',
-          ResourceRecordSet: convertToRoute53Format(existing, this.zone)
-        });
-        
-        // Then create the new version
-        allChanges.push({
-          Action: 'CREATE',
-          ResourceRecordSet: convertToRoute53Format(record, this.zone)
-        });
-      }
-
-      // Split changes into batches
-      const changeBatches = [];
-      for (let i = 0; i < allChanges.length; i += MAX_CHANGES_PER_BATCH) {
-        changeBatches.push(allChanges.slice(i, i + MAX_CHANGES_PER_BATCH));
-      }
-
-      logger.debug(`Splitting ${allChanges.length} Route53 changes into ${changeBatches.length} batches`);
-
-      // Process each batch
-      for (let i = 0; i < changeBatches.length; i++) {
-        const changes = changeBatches[i];
-        logger.debug(`Processing Route53 change batch ${i+1}/${changeBatches.length} with ${changes.length} changes`);
-        
-        const params = {
-          HostedZoneId: this.zoneId,
-          ChangeBatch: {
-            Comment: 'Batch update by TráfegoDNS',
-            Changes: changes
+  
+        // Split changes into batches
+        const changeBatches = [];
+        for (let i = 0; i < allChanges.length; i += MAX_CHANGES_PER_BATCH) {
+          changeBatches.push(allChanges.slice(i, i + MAX_CHANGES_PER_BATCH));
+        }
+  
+        logger.debug(`Splitting ${allChanges.length} Route53 changes into ${changeBatches.length} batches`);
+  
+        // Process each batch
+        for (let i = 0; i < changeBatches.length; i++) {
+          const changes = changeBatches[i];
+          logger.debug(`Processing Route53 change batch ${i+1}/${changeBatches.length} with ${changes.length} changes`);
+          
+          const params = {
+            HostedZoneId: this.zoneId,
+            ChangeBatch: {
+              Comment: 'Batch update by TráfegoDNS',
+              Changes: changes
+            }
+          };
+          
+          try {
+            const command = new ChangeResourceRecordSetsCommand(params);
+            await this.route53.send(command);
+            logger.debug(`Successfully submitted batch ${i+1}/${changeBatches.length}`);
+          } catch (error) {
+            logger.error(`Error submitting Route53 change batch ${i+1}: ${error.message}`);
+            
+            // If a batch fails, we'll need to process individual changes
+            logger.debug('Falling back to individual record processing');
+            batchSucceeded = false;
+            
+            // Break the loop to fall back to individual processing
+            break;
           }
-        };
-        
-        try {
-          const command = new ChangeResourceRecordSetsCommand(params);
-          await this.route53.send(command);
-          logger.debug(`Successfully submitted batch ${i+1}/${changeBatches.length}`);
-        } catch (error) {
-          logger.error(`Error submitting Route53 change batch ${i+1}: ${error.message}`);
+        }
+      }
+  
+      // Track which records we've successfully processed to avoid duplicates
+      const processedRecords = new Map();
+      
+      // If batch processing succeeded, we're done
+      if (batchSucceeded) {
+        // Collect all records to return in results
+        // For creates and updates, we need to refresh the cache to get the latest records
+        if (pendingChanges.create.length > 0 || pendingChanges.update.length > 0) {
+          await this.refreshRecordCache();
           
-          // If a batch fails, we'll need to process individual changes
-          logger.debug('Falling back to individual record processing');
+          // Add created records to results
+          for (const { record } of pendingChanges.create) {
+            const createdRecord = this.findRecordInCache(record.type, record.name);
+            if (createdRecord) {
+              results.push(createdRecord);
+            }
+          }
           
-          // Roll back to individual processing
-          break;
+          // Add updated records to results
+          for (const { record } of pendingChanges.update) {
+            const updatedRecord = this.findRecordInCache(record.type, record.name);
+            if (updatedRecord) {
+              results.push(updatedRecord);
+            }
+          }
         }
-      }
-    }
-
-    // Fallback to individual processing if batch processing fails
-
-    // Create new records
-    for (const { record } of pendingChanges.create) {
-      try {
-        logger.trace(`Route53Provider.batchEnsureRecords: Creating record ${record.name} (${record.type})`);
-        // Log at INFO level which record will be created
-        logger.info(`✨ Creating ${record.type} record for ${record.name}`);
-        const result = await this.createRecord(record);
-        results.push(result);
-      } catch (error) {
-        logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
-        logger.trace(`Route53Provider.batchEnsureRecords: Create error: ${error.message}`);
         
-        if (global.statsCounter) {
-          global.statsCounter.errors++;
+        // Add unchanged records to results
+        for (const { existing } of pendingChanges.unchanged) {
+          results.push(existing);
         }
-      }
-    }
-
-    // Update existing records
-    for (const { id, record } of pendingChanges.update) {
-      try {
-        logger.trace(`Route53Provider.batchEnsureRecords: Updating record ${record.name} (${record.type})`);
-        // Log at INFO level which record will be updated
-        logger.info(`📝 Updating ${record.type} record for ${record.name}`);
-        const result = await this.updateRecord(id, record);
-        results.push(result);
-      } catch (error) {
-        logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
-        logger.trace(`Route53Provider.batchEnsureRecords: Update error: ${error.message}`);
+      } else {
+        // Fallback to individual processing if batch processing fails
         
-        if (global.statsCounter) {
-          global.statsCounter.errors++;
+        // Refresh the cache to get latest state after partial batch operations
+        await this.refreshRecordCache();
+        
+        // Create new records
+        for (const { record } of pendingChanges.create) {
+          try {
+            // Check if this record already exists in the updated cache
+            // This is the key fix - avoid trying to create records that might have been
+            // created by a partially successful batch
+            const recordKey = `${record.type}:${record.name}`;
+            if (processedRecords.has(recordKey)) {
+              logger.debug(`Skipping already processed record: ${record.name} (${record.type})`);
+              continue;
+            }
+            
+            // Check if the record already exists in the cache (might have been created in a batch)
+            const existingInCache = this.findRecordInCache(record.type, record.name);
+            if (existingInCache) {
+              logger.debug(`Record ${record.name} (${record.type}) already exists, no need to create`);
+              results.push(existingInCache);
+              processedRecords.set(recordKey, true);
+              continue;
+            }
+            
+            logger.trace(`Route53Provider.batchEnsureRecords: Creating record ${record.name} (${record.type})`);
+            // Log at INFO level which record will be created
+            logger.info(`✨ Creating ${record.type} record for ${record.name}`);
+            const result = await this.createRecord(record);
+            results.push(result);
+            processedRecords.set(recordKey, true);
+          } catch (error) {
+            // Check if the error is because the record already exists
+            if (error.message && error.message.includes('already exists')) {
+              const recordKey = `${record.type}:${record.name}`;
+              processedRecords.set(recordKey, true);
+              
+              // Refresh the cache and get the existing record
+              await this.refreshRecordCache();
+              const existingRecord = this.findRecordInCache(record.type, record.name);
+              if (existingRecord) {
+                results.push(existingRecord);
+              }
+              
+              logger.debug(`Record ${record.name} (${record.type}) already exists, added to results`);
+            } else {
+              logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
+              logger.trace(`Route53Provider.batchEnsureRecords: Create error: ${error.message}`);
+              
+              if (global.statsCounter) {
+                global.statsCounter.errors++;
+              }
+            }
+          }
+        }
+  
+        // Update existing records
+        for (const { id, record } of pendingChanges.update) {
+          try {
+            const recordKey = `${record.type}:${record.name}`;
+            if (processedRecords.has(recordKey)) {
+              logger.debug(`Skipping already processed record: ${record.name} (${record.type})`);
+              continue;
+            }
+            
+            logger.trace(`Route53Provider.batchEnsureRecords: Updating record ${record.name} (${record.type})`);
+            // Log at INFO level which record will be updated
+            logger.info(`📝 Updating ${record.type} record for ${record.name}`);
+            const result = await this.updateRecord(id, record);
+            results.push(result);
+            processedRecords.set(recordKey, true);
+          } catch (error) {
+            logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
+            logger.trace(`Route53Provider.batchEnsureRecords: Update error: ${error.message}`);
+            
+            if (global.statsCounter) {
+              global.statsCounter.errors++;
+            }
+          }
+        }
+  
+        // Add unchanged records to results too
+        for (const { existing } of pendingChanges.unchanged) {
+          results.push(existing);
         }
       }
+      
+      logger.trace(`Route53Provider.batchEnsureRecords: Batch processing complete, returning ${results.length} results`);
+      return results;
+    } catch (error) {
+      logger.error(`Failed to batch process DNS records: ${error.message}`);
+      logger.trace(`Route53Provider.batchEnsureRecords: Error details: ${error.message}`);
+      throw error;
     }
-
-    // Add unchanged records to results too
-    for (const { existing } of pendingChanges.unchanged) {
-      results.push(existing);
-    }
-    
-    logger.trace(`Route53Provider.batchEnsureRecords: Batch processing complete, returning ${results.length} results`);
-    return results;
-  } catch (error) {
-    logger.error(`Failed to batch process DNS records: ${error.message}`);
-    logger.trace(`Route53Provider.batchEnsureRecords: Error details: ${error.message}`);
-    throw error;
   }
-}
 
 module.exports = {
   createRecord,
