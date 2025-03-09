@@ -67,7 +67,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            ${{ secrets.DOCKER_USERNAME }}/TrafegoDNS
+            ${{ secrets.DOCKER_USERNAME }}/trafegodns
             ghcr.io/${{ github.repository }}
           tags: |
             # Latest tag for main/master
@@ -85,7 +85,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            ${{ secrets.DOCKER_USERNAME }}/TrafegoDNS
+            ${{ secrets.DOCKER_USERNAME }}/trafegodns
             ghcr.io/${{ github.repository }}
           tags: |
             # Dev tag
@@ -113,4 +113,4 @@ jobs:
           tags: ${{ steps.meta-dev.outputs.tags }}
           labels: ${{ steps.meta-dev.outputs.labels }}
           cache-from: type=gha
-          # cache-to: type=gha,mode=max          
+          # cache-to: type=gha,mode=max
