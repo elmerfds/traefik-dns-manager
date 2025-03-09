@@ -11,7 +11,7 @@
   "license": "MIT",
   "dependencies": {
     "axios": "^1.8.2",
-    "aws-sdk": "^2.1487.0",    
+    "@aws-sdk/client-route-53": "^3.540.0", 
     "dockerode": "^4.0.4"
   }
 }
