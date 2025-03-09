@@ -26,10 +26,10 @@ jobs:
           context: .
           push: false
           load: true
-          tags: TrafegoDNS:pr-check
+          tags: trafegodns:pr-check
           cache-from: type=gha
       
       - name: Verify image builds successfully
         run: |
-          docker image inspect TrafegoDNS:pr-check
+          docker image inspect trafegodns:pr-check
           echo "✅ Docker image built successfully"
