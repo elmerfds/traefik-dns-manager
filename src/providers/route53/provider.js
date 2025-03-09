@@ -13,7 +13,7 @@ class Route53Provider extends DNSProvider {
   constructor(config) {
     super(config);
     
-    logger.trace('Route53Provider.constructor: Initializing with config');
+    logger.trace('Route53Provider.constructor: Initialising with config');
     
     // Get credentials from config
     this.accessKey = config.route53AccessKey;
@@ -73,7 +73,7 @@ class Route53Provider extends DNSProvider {
       logger.success('Route53 zone authenticated successfully');
       
       // Initialise the DNS record cache
-      logger.trace('Route53Provider.init: Initializing DNS record cache');
+      logger.trace('Route53Provider.init: Initialising DNS record cache');
       await this.refreshRecordCache();
       
       return true;
@@ -94,7 +94,7 @@ class Route53Provider extends DNSProvider {
       logger.debug('Refreshing DNS record cache from Route53');
       
       if (!this.zoneId) {
-        logger.trace('Route53Provider.refreshRecordCache: No zoneId, initializing first');
+        logger.trace('Route53Provider.refreshRecordCache: No zoneId, initialising first');
         await this.init();
         return;
       }
@@ -288,7 +288,7 @@ async listRecords(params = {}) {
       logger.trace(`Route53Provider.listRecords: Bypassing cache due to filters: ${JSON.stringify(params)}`);
       
       if (!this.zoneId) {
-        logger.trace('Route53Provider.listRecords: No zoneId, initializing first');
+        logger.trace('Route53Provider.listRecords: No zoneId, initialising first');
         await this.init();
       }
       
@@ -410,7 +410,7 @@ async createRecord(record) {
     
     // Make sure we have zoneId
     if (!this.zoneId) {
-      logger.trace('Route53Provider.createRecord: No zoneId, initializing first');
+      logger.trace('Route53Provider.createRecord: No zoneId, initialising first');
       await this.init();
     }
     
@@ -503,7 +503,7 @@ async updateRecord(id, record) {
     
     // Make sure we have zoneId
     if (!this.zoneId) {
-      logger.trace('Route53Provider.updateRecord: No zoneId, initializing first');
+      logger.trace('Route53Provider.updateRecord: No zoneId, initialising first');
       await this.init();
     }
     
@@ -608,7 +608,7 @@ async deleteRecord(id) {
     
     // Make sure we have zoneId
     if (!this.zoneId) {
-      logger.trace('Route53Provider.deleteRecord: No zoneId, initializing first');
+      logger.trace('Route53Provider.deleteRecord: No zoneId, initialising first');
       await this.init();
     }
     
