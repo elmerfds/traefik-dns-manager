@@ -25,12 +25,14 @@ class ConfigManager {
     this.cloudflareToken = EnvironmentLoader.getString('CLOUDFLARE_TOKEN');
     this.cloudflareZone = EnvironmentLoader.getString('CLOUDFLARE_ZONE');
     
-    // Route53 settings (for future implementation)
+    // Route53 settings
     this.route53AccessKey = EnvironmentLoader.getString('ROUTE53_ACCESS_KEY');
     this.route53SecretKey = EnvironmentLoader.getString('ROUTE53_SECRET_KEY');
     this.route53Zone = EnvironmentLoader.getString('ROUTE53_ZONE');
+    this.route53ZoneId = EnvironmentLoader.getString('ROUTE53_ZONE_ID');
+    this.route53Region = EnvironmentLoader.getString('ROUTE53_REGION', 'us-east-1');
     
-    // Digital Ocean settings (for future implementation)
+    // Digital Ocean settings
     this.digitalOceanToken = EnvironmentLoader.getString('DO_TOKEN');
     this.digitalOceanDomain = EnvironmentLoader.getString('DO_DOMAIN');
     
@@ -148,8 +150,10 @@ class ConfigManager {
         if (!this.route53SecretKey) {
           throw new Error('ROUTE53_SECRET_KEY environment variable is required for Route53 provider');
         }
-        if (!this.route53Zone) {
-          throw new Error('ROUTE53_ZONE environment variable is required for Route53 provider');
+        
+        // Allow either zone name or zone ID (prefer zone name for consistency with other providers)
+        if (!this.route53Zone && !this.route53ZoneId) {
+          throw new Error('Either ROUTE53_ZONE or ROUTE53_ZONE_ID environment variable is required for Route53 provider');
         }
         break;
         

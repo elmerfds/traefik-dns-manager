@@ -6,7 +6,7 @@ const DNSProvider = require('./base');
 const DNSProviderFactory = require('./factory');
 const CloudflareProvider = require('./cloudflare');
 const DigitalOceanProvider = require('./digitalocean');
-// const Route53Provider = require('./route53');
+const Route53Provider = require('./route53');
 
 // Provider types enum for easier reference
 const ProviderTypes = {
@@ -24,7 +24,7 @@ module.exports = {
   // Provider implementations
   CloudflareProvider,
   DigitalOceanProvider,
-  // Route53Provider,
+  Route53Provider,
   
   // Constants
   ProviderTypes
