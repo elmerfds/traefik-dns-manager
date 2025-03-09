@@ -35,9 +35,8 @@ class RecordTracker {
         .map(hostname => hostname.trim())
         .filter(hostname => hostname.length > 0);
       
-      if (this.preservedHostnames.length > 0) {
-        logger.info(`Loaded ${this.preservedHostnames.length} preserved hostnames: ${this.preservedHostnames.join(', ')}`);
-      } else {
+      // Don't log here - will be displayed in startup banner by StatusReporter
+      if (this.preservedHostnames.length === 0) {
         logger.debug('No preserved hostnames configured');
         this.preservedHostnames = [];
       }
@@ -116,7 +115,7 @@ class RecordTracker {
       name: record.name,
       type: record.type,
       createdAt: new Date().toISOString(),
-      managedBy: 'Traefik DNS Manager'
+      managedBy: 'TráfegoDNS'
     });
     
     // Save after each new record to prevent data loss
