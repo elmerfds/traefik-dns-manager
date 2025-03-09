@@ -25,7 +25,7 @@ class Route53Provider extends DNSProvider {
     AWS.config.update({
       accessKeyId: this.accessKey,
       secretAccessKey: this.secretKey,
-      region: config.route53Region || 'eu-central-1' // Default to eu-central-1 if not specified
+      region: config.route53Region || 'eu-west-2' // Default to eu-west-2 if not specified
     });
     
     // Create Route53 service
