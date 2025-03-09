@@ -14,6 +14,7 @@ A service that automatically manages DNS records based on Traefik routing config
 - [DNS Provider Configuration](#dns-provider-configuration)
   - [Cloudflare](#cloudflare)
   - [DigitalOcean](#digitalocean)
+  - [Route53](#route53)
 - [Service Labels](#service-labels)
   - [Basic Labels](#basic-labels-provider-agnostic)
   - [Provider-Specific Labels](#provider-specific-labels-override-provider-agnostic-labels)
@@ -53,7 +54,7 @@ A service that automatically manages DNS records based on Traefik routing config
 |:--------:|:------:|:----------------------:|
 | ![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white) | ![Stable](https://img.shields.io/badge/✓-Stable-success) | Full support for all record types and features |
 | ![DigitalOcean](https://img.shields.io/badge/DigitalOcean-0080FF?style=flat&logo=digitalocean&logoColor=white) | ![Stable](https://img.shields.io/badge/✓-Stable-success) | Full support for all record types and features |
-| ![AWS](https://img.shields.io/badge/Route53-FF9900?style=flat&logo=amazonaws&logoColor=white) | ![Planned](https://img.shields.io/badge/⟳-Planned-blue) | Coming soon |
+| ![AWS](https://img.shields.io/badge/Route53-FF9900?style=flat&logo=amazonaws&logoColor=white) | ![Stable](https://img.shields.io/badge/✓-Stable-success) | Full support for all record types and features |
 
 ## Quick Start
 
@@ -70,7 +71,7 @@ services:
     user: "0:0"  # Required for Docker socket access
     environment:
       # DNS Provider (choose one)
-      - DNS_PROVIDER=cloudflare  # Options: cloudflare, digitalocean
+      - DNS_PROVIDER=cloudflare  # Options: cloudflare, digitalocean, route53
       
       # Cloudflare settings (if using Cloudflare)
       - CLOUDFLARE_TOKEN=your_cloudflare_api_token
@@ -79,6 +80,13 @@ services:
       # DigitalOcean settings (if using DigitalOcean)
       - DO_TOKEN=your_digitalocean_api_token
       - DO_DOMAIN=example.com
+      
+      # Route53 settings (if using Route53)
+      - ROUTE53_ACCESS_KEY=your_aws_access_key
+      - ROUTE53_SECRET_KEY=your_aws_secret_key
+      - ROUTE53_ZONE=example.com
+      # - ROUTE53_ZONE_ID=Z1234567890ABC  # Alternative to ROUTE53_ZONE
+      # - ROUTE53_REGION=eu-west-2  # Optional, defaults to eu-west-2 (London)
       
       # Traefik API settings
       - TRAEFIK_API_URL=http://traefik:8080/api
@@ -128,6 +136,46 @@ DigitalOcean-specific notes:
 - No proxying support (all `proxied` labels are ignored)
 - Automatically adds trailing dots for domain names as required by DigitalOcean
 
+### Route53
+
+AWS Route53 requires IAM credentials with permissions to modify DNS records:
+
+```yaml
+environment:
+  - DNS_PROVIDER=route53
+  - ROUTE53_ACCESS_KEY=your_aws_access_key
+  - ROUTE53_SECRET_KEY=your_aws_secret_key
+  - ROUTE53_ZONE=example.com
+  # - ROUTE53_ZONE_ID=Z1234567890ABC  # Alternative to ROUTE53_ZONE
+  # - ROUTE53_REGION=eu-west-2  # Optional, defaults to eu-west-2 (London)
+```
+
+Route53-specific notes:
+- Minimum TTL of 60 seconds (enforced by provider)
+- No proxying support (all `proxied` labels are ignored)
+- Automatically adds trailing dots for domain names as required by Route53
+- Supports batch processing for efficient API usage
+
+Required AWS IAM permissions:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "route53:ListHostedZones",
+                "route53:ListHostedZonesByName",
+                "route53:GetHostedZone",
+                "route53:ListResourceRecordSets",
+                "route53:ChangeResourceRecordSets"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
 ## Service Labels
 
 The DNS Manager supports the following labels for customising DNS record creation:
@@ -140,7 +188,7 @@ The DNS Manager supports the following labels for customising DNS record creatio
 | `dns.manage` | Enable DNS management for this service | Depends on `DNS_DEFAULT_MANAGE` |
 | `dns.type` | DNS record type (A, AAAA, CNAME, etc.) | `CNAME` or `A` for apex domains |
 | `dns.content` | Record content/value | Domain for CNAME, Public IP for A |
-| `dns.ttl` | Record TTL in seconds | `1` (Auto) for Cloudflare, `30` for DigitalOcean |
+| `dns.ttl` | Record TTL in seconds | `1` (Auto) for Cloudflare, `30` for DigitalOcean, `60` for Route53 |
 
 ### Provider-Specific Labels (Override Provider-Agnostic Labels)
 
@@ -157,6 +205,11 @@ The DNS Manager supports the following labels for customising DNS record creatio
 | `dns.digitalocean.type` | DNS record type for DigitalOcean | `CNAME` or `A` for apex domains | DigitalOcean |
 | `dns.digitalocean.content` | Record content for DigitalOcean | Domain for CNAME, Public IP for A | DigitalOcean |
 | `dns.digitalocean.ttl` | Record TTL for DigitalOcean in seconds | `30` (Minimum) | DigitalOcean |
+| `dns.route53.skip` | Skip Route53 DNS management for this service | `false` | Route53 |
+| `dns.route53.manage` | Enable Route53 DNS management for this service | Depends on `DNS_DEFAULT_MANAGE` | Route53 |
+| `dns.route53.type` | DNS record type for Route53 | `CNAME` or `A` for apex domains | Route53 |
+| `dns.route53.content` | Record content for Route53 | Domain for CNAME, Public IP for A | Route53 |
+| `dns.route53.ttl` | Record TTL for Route53 in seconds | `60` (Minimum) | Route53 |
 
 ### Type-Specific Labels
 
@@ -186,6 +239,7 @@ Different DNS providers have different requirements for TTL values:
 |----------|-------------|-------------|-------|
 | Cloudflare | 1 second | 1 second (Auto) | TTL is ignored for proxied records (always Auto) |
 | DigitalOcean | 30 seconds | 30 seconds | Values below 30 are automatically adjusted to 30 |
+| Route53 | 60 seconds | 60 seconds | Values below 60 are automatically adjusted to 60 |
 
 ## Usage Examples
 
@@ -231,7 +285,7 @@ services:
       - "dns.content=203.0.113.10"  # Custom IP address
 ```
 
-### Set Custom TTL for DigitalOcean DNS
+### Set Custom TTL for Route53 DNS
 
 ```yaml
 services:
@@ -240,7 +294,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.my-app.rule=Host(`app.example.com`)"
-      - "dns.digitalocean.ttl=3600"  # Set TTL to 1 hour (3600 seconds)
+      - "dns.route53.ttl=3600"  # Set TTL to 1 hour (3600 seconds)
 ```
 
 ### Skip DNS Management for a Service
@@ -253,7 +307,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.internal.rule=Host(`internal.example.com`)"
       - "dns.skip=true"  # Skip DNS management for all providers
-      # OR "dns.cloudflare.skip=true"  # Skip just Cloudflare DNS management
+      # OR "dns.route53.skip=true"  # Skip just Route53 DNS management
 ```
 
 ### Opt-in DNS Management (when DNS_DEFAULT_MANAGE=false)
@@ -266,7 +320,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.public.rule=Host(`public.example.com`)"
       - "dns.manage=true"  # Explicitly enable DNS management for all providers
-      # OR "dns.cloudflare.manage=true"  # Enable just for Cloudflare
+      # OR "dns.route53.manage=true"  # Enable just for Route53
 ```
 
 ### Create MX Record
@@ -302,6 +356,17 @@ services:
 | `DO_TOKEN` | DigitalOcean API token with write access | - | Yes |
 | `DO_DOMAIN` | Your domain name (e.g., example.com) | - | Yes |
 
+### Route53 Settings
+| Variable | Description | Default | Required if using Route53 |
+|----------|-------------|---------|----------|
+| `ROUTE53_ACCESS_KEY` | AWS IAM access key with Route53 permissions | - | Yes |
+| `ROUTE53_SECRET_KEY` | AWS IAM secret key | - | Yes |
+| `ROUTE53_ZONE` | Your domain name (e.g., example.com) | - | Yes* |
+| `ROUTE53_ZONE_ID` | Your Route53 hosted zone ID | - | Yes* |
+| `ROUTE53_REGION` | AWS region for API calls | `eu-west-2` | No |
+
+*Either `ROUTE53_ZONE` or `ROUTE53_ZONE_ID` must be provided.
+
 ### Traefik API Settings
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
@@ -314,7 +379,7 @@ services:
 |----------|-------------|---------|----------|
 | `DNS_LABEL_PREFIX` | Base prefix for DNS labels | `dns.` | No |
 | `DNS_DEFAULT_TYPE` | Default DNS record type | `CNAME` | No |
-| `DNS_DEFAULT_CONTENT` | Default record content | Value of `CLOUDFLARE_ZONE` or `DO_DOMAIN` | No |
+| `DNS_DEFAULT_CONTENT` | Default record content | Value of `CLOUDFLARE_ZONE` or `DO_DOMAIN` or `ROUTE53_ZONE` | No |
 | `DNS_DEFAULT_PROXIED` | Default Cloudflare proxy status | `true` | No |
 | `DNS_DEFAULT_TTL` | Default TTL in seconds | `1` (Auto for Cloudflare) or minimum TTL for provider | No |
 | `DNS_DEFAULT_MANAGE` | Global DNS management mode | `true` | No |
@@ -377,7 +442,7 @@ Preserved hostnames will be logged during startup and skipped during any cleanup
 
 The application maintains a persistent record of all DNS entries it creates in a JSON file `dns-records.json`. This enables:
 
-1. **Provider Independence**: Consistent tracking across different DNS providers (Cloudflare, DigitalOcean)
+1. **Provider Independence**: Consistent tracking across different DNS providers (Cloudflare, DigitalOcean, Route53)
 2. **Safety**: Only records created by the tool are ever deleted during cleanup
 3. **Persistence**: Record history is maintained between application restarts
 
@@ -391,7 +456,7 @@ volumes:
 
 ## DNS Management Modes
 
-TraeDnsManager supports two operational modes for DNS management:
+TráfegoDNS supports two operational modes for DNS management:
 
 ### Opt-out Mode (Default)
 - Set `DNS_DEFAULT_MANAGE=true` or leave it unset
