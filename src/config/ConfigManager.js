@@ -30,7 +30,7 @@ class ConfigManager {
     this.route53SecretKey = EnvironmentLoader.getString('ROUTE53_SECRET_KEY');
     this.route53Zone = EnvironmentLoader.getString('ROUTE53_ZONE');
     this.route53ZoneId = EnvironmentLoader.getString('ROUTE53_ZONE_ID');
-    this.route53Region = EnvironmentLoader.getString('ROUTE53_REGION', 'us-east-1');
+    this.route53Region = EnvironmentLoader.getString('ROUTE53_REGION', 'eu-west-2');
     
     // Digital Ocean settings
     this.digitalOceanToken = EnvironmentLoader.getString('DO_TOKEN');
@@ -53,7 +53,22 @@ class ConfigManager {
     this.defaultRecordType = EnvironmentLoader.getString('DNS_DEFAULT_TYPE', 'CNAME');
     this.defaultContent = EnvironmentLoader.getString('DNS_DEFAULT_CONTENT', this.getProviderDomain());
     this.defaultProxied = EnvironmentLoader.getBool('DNS_DEFAULT_PROXIED', true);
-    this.defaultTTL = EnvironmentLoader.getInt('DNS_DEFAULT_TTL', 1);
+    
+    // Set default TTL based on the provider
+    switch (this.dnsProvider.toLowerCase()) {
+      case 'cloudflare':
+        this.defaultTTL = EnvironmentLoader.getInt('DNS_DEFAULT_TTL', 1); // Cloudflare minimum is 1 (Auto)
+        break;
+      case 'digitalocean':
+        this.defaultTTL = EnvironmentLoader.getInt('DNS_DEFAULT_TTL', 30); // DigitalOcean minimum is 30
+        break;
+      case 'route53':
+        this.defaultTTL = EnvironmentLoader.getInt('DNS_DEFAULT_TTL', 60); // Route53 minimum is 60
+        break;
+      default:
+        this.defaultTTL = EnvironmentLoader.getInt('DNS_DEFAULT_TTL', 1); // Default fallback
+    }
+    
     this.defaultManage = EnvironmentLoader.getBool('DNS_DEFAULT_MANAGE', true);
     
     // Record type specific defaults - we'll set A content after IP discovery
