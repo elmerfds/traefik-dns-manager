@@ -21,21 +21,21 @@ class Route53Provider extends DNSProvider {
     this.zone = config.route53Zone;
     this.zoneId = config.route53ZoneId; // May be null if not specified in config
     
-    // Initialize AWS SDK
+    // Initialise AWS SDK
     AWS.config.update({
       accessKeyId: this.accessKey,
       secretAccessKey: this.secretKey,
-      region: config.route53Region || 'us-east-1' // Default to us-east-1 if not specified
+      region: config.route53Region || 'eu-central-1' // Default to eu-central-1 if not specified
     });
     
     // Create Route53 service
     this.route53 = new AWS.Route53();
     
-    logger.trace('Route53Provider.constructor: AWS Route53 client initialized');
+    logger.trace('Route53Provider.constructor: AWS Route53 client initialised');
   }
   
   /**
-   * Initialize API by fetching hosted zone ID if not provided
+   * Initialise API by fetching hosted zone ID if not provided
    */
   async init() {
     logger.trace(`Route53Provider.init: Starting initialization for zone "${this.zone}"`);
@@ -72,15 +72,15 @@ class Route53Provider extends DNSProvider {
       
       logger.success('Route53 zone authenticated successfully');
       
-      // Initialize the DNS record cache
+      // Initialise the DNS record cache
       logger.trace('Route53Provider.init: Initializing DNS record cache');
       await this.refreshRecordCache();
       
       return true;
     } catch (error) {
-      logger.error(`Failed to initialize Route53 API: ${error.message}`);
+      logger.error(`Failed to initialise Route53 API: ${error.message}`);
       logger.trace(`Route53Provider.init: Error details: ${JSON.stringify(error)}`);
-      throw new Error(`Failed to initialize Route53 API: ${error.message}`);
+      throw new Error(`Failed to initialise Route53 API: ${error.message}`);
     }
   }
   
