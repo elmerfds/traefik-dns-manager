@@ -51,6 +51,24 @@ function getLabelValue(labels, genericPrefix, providerPrefix, key, defaultValue)
 }
 
 /**
+ * Get the minimum TTL value for a specific DNS provider
+ * @param {string} provider - The DNS provider name
+ * @returns {number} - The minimum TTL value in seconds
+ */
+function getMinimumTTL(provider) {
+  switch (provider.toLowerCase()) {
+    case 'cloudflare':
+      return 1;  // Cloudflare supports TTL as low as 1 second (Auto)
+    case 'digitalocean':
+      return 30;  // DigitalOcean minimum TTL is 30 seconds
+    case 'route53':
+      return 60;  // Route53 minimum TTL is 60 seconds
+    default:
+      return 1;  // Default minimum
+  }
+}
+
+/**
  * Extract DNS configuration from container labels
  */
 function extractDnsConfigFromLabels(labels, config, hostname) {
@@ -220,5 +238,6 @@ function extractDnsConfigFromLabels(labels, config, hostname) {
 module.exports = {
   isApexDomain,
   extractDnsConfigFromLabels,
-  getLabelValue
+  getLabelValue,
+  getMinimumTTL
 };
