@@ -1,6 +1,36 @@
-# Traefik DNS Manager
+# TráfegoDNS
+
+<div align="center">
+  <img src="logo.svg" alt="TráfegoDNS Logo" width="200" height="200">
+</div>
 
 A service that automatically manages DNS records based on Traefik routing configuration.
+
+## Table of Contents
+
+- [Features](#features)
+- [Supported DNS Providers](#supported-dns-providers)
+- [Quick Start](#quick-start)
+- [DNS Provider Configuration](#dns-provider-configuration)
+  - [Cloudflare](#cloudflare)
+  - [DigitalOcean](#digitalocean)
+- [Service Labels](#service-labels)
+  - [Basic Labels](#basic-labels-provider-agnostic)
+  - [Provider-Specific Labels](#provider-specific-labels-override-provider-agnostic-labels)
+  - [Type-Specific Labels](#type-specific-labels)
+- [Label Precedence](#label-precedence)
+- [Provider-Specific TTL Requirements](#provider-specific-ttl-requirements)
+- [Usage Examples](#usage-examples)
+- [Environment Variables](#environment-variables)
+- [Automated Cleanup of Orphaned Records](#automated-cleanup-of-orphaned-records)
+  - [Preserving Specific DNS Records](#preserving-specific-dns-records)
+- [DNS Record Tracking](#dns-record-tracking)
+- [DNS Management Modes](#dns-management-modes)
+- [Logging System](#logging-system)
+- [Performance Optimisation](#performance-optimisation)
+- [Automatic Apex Domain Handling](#automatic-apex-domain-handling)
+- [Building from Source](#building-from-source)
+- [Licence](#licence)
 
 ## Features
 
@@ -10,10 +40,12 @@ A service that automatically manages DNS records based on Traefik routing config
 - 🌐 Automatic public IP detection for apex domains
 - 🎛️ Fine-grained control with service-specific labels
 - 💪 Fault-tolerant design with retry mechanisms
-- 🧹 Optional cleanup of orphaned DNS records
-- 📊 Optimized performance with DNS caching and batch processing
+- 🧹 Optional cleanup of orphaned DNS records with preservation capabilities
+- 📊 Optimised performance with DNS caching and batch processing
 - 🖨️ Configurable logging levels for better troubleshooting
 - 🔌 Multi-provider support with provider-agnostic label system
+- 🔒 Preserves manually created DNS records using smart tracking system
+- 🛡️ Support for explicitly preserving specific hostnames from cleanup
 
 ## Supported DNS Providers
 
@@ -54,8 +86,10 @@ services:
       
       # DNS record management
       - CLEANUP_ORPHANED=true  # Set to true to automatically remove DNS records when containers are removed
+      - PRESERVED_HOSTNAMES=static.example.com,api.example.com,*.admin.example.com  # Hostnames to preserve (even when orphaned)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./dns-records.json:/app/dns-records.json  # Persist tracking information
     networks:
       - traefik-network
 ```
@@ -96,7 +130,7 @@ DigitalOcean-specific notes:
 
 ## Service Labels
 
-The DNS Manager supports the following labels for customizing DNS record creation:
+The DNS Manager supports the following labels for customising DNS record creation:
 
 ### Basic Labels (Provider-Agnostic)
 
@@ -292,12 +326,13 @@ services:
 | `PUBLIC_IPV6` | Manual override for public IPv6 | Auto-detected | No |
 | `IP_REFRESH_INTERVAL` | How often to refresh IP (ms) | `3600000` (1 hour) | No |
 
-### Application Behavior
+### Application Behaviour
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `POLL_INTERVAL` | How often to poll Traefik API (ms) | `60000` (1 min) | No |
 | `WATCH_DOCKER_EVENTS` | Whether to watch Docker events | `true` | No |
 | `CLEANUP_ORPHANED` | Whether to remove orphaned DNS records | `false` | No |
+| `PRESERVED_HOSTNAMES` | Comma-separated list of hostnames to exclude from cleanup | - | No |
 | `DOCKER_SOCKET` | Path to Docker socket | `/var/run/docker.sock` | No |
 | `LOG_LEVEL` | Logging verbosity (ERROR, WARN, INFO, DEBUG, TRACE) | `INFO` | No |
 | `DNS_CACHE_REFRESH_INTERVAL` | How often to refresh DNS cache (ms) | `3600000` (1 hour) | No |
@@ -318,13 +353,45 @@ This will:
 - Skip system records (NS, SOA, CAA) and apex domain records
 
 To avoid premature deletion, the system will:
-- Perform hostname normalization to ensure case-insensitive comparison
+- Perform hostname normalisation to ensure case-insensitive comparison
 - Skip records that don't match the managed domain pattern
+- Only delete records that were created by this tool
 - Log all orphaned records before deletion for verification
+
+### Preserving Specific DNS Records
+
+You can specify hostnames that should never be deleted, even if they become orphaned:
+
+```yaml
+environment:
+  - PRESERVED_HOSTNAMES=static.example.com,api.example.com,*.admin.example.com
+```
+
+This supports:
+- Exact hostnames (e.g., `api.example.com`)
+- Wildcard subdomains (e.g., `*.admin.example.com`) which will preserve all subdomains that match the pattern
+
+Preserved hostnames will be logged during startup and skipped during any cleanup operations.
+
+## DNS Record Tracking
+
+The application maintains a persistent record of all DNS entries it creates in a JSON file `dns-records.json`. This enables:
+
+1. **Provider Independence**: Consistent tracking across different DNS providers (Cloudflare, DigitalOcean)
+2. **Safety**: Only records created by the tool are ever deleted during cleanup
+3. **Persistence**: Record history is maintained between application restarts
+
+For optimal reliability, mount this file as a volume in your Docker setup:
+
+```yaml
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock:ro
+  - ./dns-records.json:/app/dns-records.json
+```
 
 ## DNS Management Modes
 
-Traefik DNS Manager supports two operational modes for DNS management:
+TraeDnsManager supports two operational modes for DNS management:
 
 ### Opt-out Mode (Default)
 - Set `DNS_DEFAULT_MANAGE=true` or leave it unset
@@ -353,17 +420,17 @@ The default level is `INFO`, which provides a clean, readable output with import
 ### INFO Level Format
 
 ```
-✅ Starting Traefik DNS Manager
+✅ Starting TráfegoDNS
 ℹ️ Cloudflare Zone: example.com
 ℹ️ Processing 30 hostnames for DNS management
 ✅ Created A record for example.com
 ℹ️ 29 DNS records are up to date
-✅ Traefik DNS Manager running successfully
+✅ TráfegoDNS running successfully
 ```
 
-## Performance Optimization
+## Performance Optimisation
 
-The application includes built-in performance optimizations to reduce API calls and improve efficiency:
+The application includes built-in performance optimisations to reduce API calls and improve efficiency:
 
 ### DNS Caching
 
@@ -408,6 +475,6 @@ docker run -d \
   traefik-dns-manager
 ```
 
-## License
+## Licence
 
 MIT
