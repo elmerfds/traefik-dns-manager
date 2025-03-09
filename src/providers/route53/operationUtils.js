@@ -7,6 +7,67 @@ const { convertToRoute53Format } = require('./converter');
 const { validateRecord } = require('./validator');
 
 /**
+ * Analyse a Route53 batch operation error and categorize it
+ * @param {Error} error - The error object from AWS API
+ * @returns {Object} - Categorized error information with affected records
+ */
+function analyzeBatchError(error) {
+  // Default error category
+  let category = 'UNKNOWN_ERROR';
+  let message = error.message;
+  let affectedRecords = [];
+  let shouldRetryIndividually = true;
+  let logLevel = 'error'; // Default log level
+  
+  // Check if this is a ServiceException or another AWS-specific error type
+  if (error.name === 'InvalidChangeBatch') {
+    category = 'INVALID_CHANGE_BATCH';
+    
+    // Extract specific record information from the error message
+    const recordPattern = /resource record set ['"]([A-Z]+)\s+([^'"]+)['"]/g;
+    let match;
+    
+    while ((match = recordPattern.exec(message)) !== null) {
+      const recordType = match[1];
+      const recordName = match[2];
+      affectedRecords.push({ type: recordType, name: recordName });
+    }
+    
+    // Check if the error is about records already existing
+    if (message.includes('already exists')) {
+      category = 'RECORD_EXISTS';
+      shouldRetryIndividually = false; // No need to retry, just fetch existing records
+      logLevel = 'debug'; // Downgrade to debug since this is an expected condition
+    }
+    // Check if the error is about invalid changes
+    else if (message.includes('invalid set of changes')) {
+      category = 'RECORD_CONFLICT';
+      shouldRetryIndividually = true; // Try individual processing
+    }
+  } 
+  // Handle throttling errors (rate limits)
+  else if (error.name === 'Throttling' || message.includes('Rate exceeded')) {
+    category = 'RATE_LIMIT';
+    shouldRetryIndividually = true;
+    logLevel = 'warn';
+  }
+  // Handle authentication/authorization errors
+  else if (error.name === 'AccessDenied' || error.name === 'InvalidSignature') {
+    category = 'AUTH_ERROR';
+    shouldRetryIndividually = false; // Auth errors won't be fixed by retrying
+  }
+  
+  return {
+    category,
+    message,
+    affectedRecords,
+    shouldRetryIndividually,
+    logLevel,
+    originalError: error
+  };
+}
+
+/**
  * Create a new DNS record
  */
 async function createRecord(record) {
@@ -81,6 +142,22 @@ async function createRecord(record) {
     
     return createdRecord;
   } catch (error) {
+    // Analyze the error
+    const errorAnalysis = analyzeBatchError(error);
+    
+    // If record already exists, this isn't a true error
+    if (errorAnalysis.category === 'RECORD_EXISTS') {
+      logger.debug(`${record.type} record for ${record.name} already exists, fetching from cache`);
+      
+      // Refresh the cache and get the existing record
+      await this.refreshRecordCache();
+      const existingRecord = this.findRecordInCache(record.type, record.name);
+      
+      if (existingRecord) {
+        return existingRecord;
+      }
+    }
+    
     logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
     logger.trace(`Route53Provider.createRecord: Error details: ${JSON.stringify(error)}`);
     throw error;
@@ -460,14 +537,35 @@ async function batchEnsureRecords(recordConfigs) {
             await this.route53.send(command);
             logger.debug(`Successfully submitted batch ${i+1}/${changeBatches.length}`);
           } catch (error) {
-            logger.error(`Error submitting Route53 change batch ${i+1}: ${error.message}`);
+            // Analyze the error
+            const errorAnalysis = analyzeBatchError(error);
             
-            // If a batch fails, we'll need to process individual changes
-            logger.debug('Falling back to individual record processing');
-            batchSucceeded = false;
+            // Log the error at the appropriate level
+            const logMethod = errorAnalysis.logLevel === 'debug' ? logger.debug : 
+                             errorAnalysis.logLevel === 'warn' ? logger.warn : logger.error;
             
-            // Break the loop to fall back to individual processing
-            break;
+            logMethod.call(logger, `Route53 batch ${i+1} error (${errorAnalysis.category}): ${errorAnalysis.message}`);
+            
+            if (errorAnalysis.affectedRecords.length > 0) {
+              logger.debug(`Affected records: ${errorAnalysis.affectedRecords.map(r => `${r.type} ${r.name}`).join(', ')}`);
+            }
+            
+            // Determine if we should fall back to individual processing
+            if (errorAnalysis.shouldRetryIndividually) {
+              logger.debug('Falling back to individual record processing');
+              batchSucceeded = false;
+              
+              // Break the loop to fall back to individual processing
+              break;
+            } else if (errorAnalysis.category === 'RECORD_EXISTS') {
+              // For records that already exist, we can just refresh our cache
+              logger.debug('Records already exist, refreshing cache to get current state');
+              await this.refreshRecordCache();
+              continue;
+            } else {
+              // For auth errors or other serious issues, propagate the error
+              throw error;
+            }
           }
         }
       }
@@ -537,8 +635,11 @@ async function batchEnsureRecords(recordConfigs) {
             results.push(result);
             processedRecords.set(recordKey, true);
           } catch (error) {
+            // Analyze the individual error
+            const errorAnalysis = analyzeBatchError(error);
+            
             // Check if the error is because the record already exists
-            if (error.message && error.message.includes('already exists')) {
+            if (errorAnalysis.category === 'RECORD_EXISTS') {
               const recordKey = `${record.type}:${record.name}`;
               processedRecords.set(recordKey, true);
               
@@ -547,11 +648,16 @@ async function batchEnsureRecords(recordConfigs) {
               const existingRecord = this.findRecordInCache(record.type, record.name);
               if (existingRecord) {
                 results.push(existingRecord);
+                logger.debug(`Record ${record.name} (${record.type}) already exists, added to results`);
+              } else {
+                logger.warn(`Record ${record.name} (${record.type}) reported as existing but not found in cache`);
               }
-              
-              logger.debug(`Record ${record.name} (${record.type}) already exists, added to results`);
             } else {
-              logger.error(`Failed to create ${record.type} record for ${record.name}: ${error.message}`);
+              // Log at the appropriate level based on the error analysis
+              const logMethod = errorAnalysis.logLevel === 'debug' ? logger.debug : 
+                               errorAnalysis.logLevel === 'warn' ? logger.warn : logger.error;
+                               
+              logMethod.call(logger, `Failed to create ${record.type} record for ${record.name}: ${error.message}`);
               logger.trace(`Route53Provider.batchEnsureRecords: Create error: ${error.message}`);
               
               if (global.statsCounter) {
@@ -577,7 +683,14 @@ async function batchEnsureRecords(recordConfigs) {
             results.push(result);
             processedRecords.set(recordKey, true);
           } catch (error) {
-            logger.error(`Failed to update ${record.type} record for ${record.name}: ${error.message}`);
+            // Analyze the individual error
+            const errorAnalysis = analyzeBatchError(error);
+            
+            // Log at the appropriate level based on the error analysis
+            const logMethod = errorAnalysis.logLevel === 'debug' ? logger.debug : 
+                             errorAnalysis.logLevel === 'warn' ? logger.warn : logger.error;
+                             
+            logMethod.call(logger, `Failed to update ${record.type} record for ${record.name}: ${error.message}`);
             logger.trace(`Route53Provider.batchEnsureRecords: Update error: ${error.message}`);
             
             if (global.statsCounter) {
