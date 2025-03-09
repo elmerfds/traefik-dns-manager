@@ -26,10 +26,10 @@ jobs:
           context: .
           push: false
           load: true
-          tags: traefik-dns-manager:pr-check
+          tags: trafegodns:pr-check
           cache-from: type=gha
       
       - name: Verify image builds successfully
         run: |
-          docker image inspect traefik-dns-manager:pr-check
+          docker image inspect trafegodns:pr-check
           echo "✅ Docker image built successfully"

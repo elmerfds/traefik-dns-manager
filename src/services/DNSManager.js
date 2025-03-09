@@ -14,10 +14,13 @@ class DNSManager {
     this.eventBus = eventBus;
     this.dnsProvider = DNSProviderFactory.createProvider(config);
     
-    // Initialize record tracker
+    // Initialise record tracker
     this.recordTracker = new RecordTracker(config);
     
-    // Initialize counters for statistics
+    // Track which preserved records we've already logged to avoid spam
+    this.loggedPreservedRecords = new Set();
+    
+    // Initialise counters for statistics
     this.stats = {
       created: 0,
       updated: 0,
@@ -36,16 +39,16 @@ class DNSManager {
   }
   
   /**
-   * Initialize the DNS Manager
+   * Initialise the DNS Manager
    */
   async init() {
     try {
       logger.debug('Initializing DNS Manager...');
       await this.dnsProvider.init();
-      logger.success('DNS Manager initialized successfully');
+      logger.success('DNS Manager initialised successfully');
       return true;
     } catch (error) {
-      logger.error(`Failed to initialize DNS Manager: ${error.message}`);
+      logger.error(`Failed to initialise DNS Manager: ${error.message}`);
       throw error;
     }
   }
@@ -214,6 +217,13 @@ class DNSManager {
   }
   
   /**
+   * Reset logged preserved records tracking
+   */
+  resetLoggedPreservedRecords() {
+    this.loggedPreservedRecords = new Set();
+  }
+  
+  /**
    * Log statistics about processed DNS records
    */
   logStats() {
@@ -304,9 +314,10 @@ class DNSManager {
         // Check if this record is tracked by our tool
         if (!this.recordTracker.isTracked(record)) {
           // Support legacy records with comment for backward compatibility
-          if (this.config.dnsProvider === 'cloudflare' && record.comment === 'Managed by Traefik DNS Manager') {
+          if (this.config.dnsProvider === 'cloudflare' && 
+              (record.comment === 'Managed by Traefik DNS Manager' || 
+               record.comment === 'Managed by TráfegoDNS')) {
             // This is a legacy record created before we implemented tracking
-            // Add it to our tracker for future reference
             logger.debug(`Found legacy managed record with comment: ${record.name} (${record.type})`);
             this.recordTracker.trackRecord(record);
           } else {
@@ -342,6 +353,23 @@ class DNSManager {
         
         // Log each record for debugging
         logger.debug(`Checking record FQDN: ${recordFqdn} (${record.type})`);
+        
+        // Check if this record should be preserved
+        if (this.recordTracker.shouldPreserveHostname(recordFqdn)) {
+          // Create a unique key for this record for tracking log messages
+          const recordKey = `${recordFqdn}-${record.type}`;
+          
+          // If we haven't logged this record yet, log at INFO level
+          if (!this.loggedPreservedRecords.has(recordKey)) {
+            logger.info(`Preserving DNS record (in preserved list): ${recordFqdn} (${record.type})`);
+            this.loggedPreservedRecords.add(recordKey);
+          } else {
+            // We've already logged this one, use DEBUG level to avoid spam
+            logger.debug(`Preserving DNS record (in preserved list): ${recordFqdn} (${record.type})`);
+          }
+          
+          continue;
+        }
         
         // Check if this record is still active
         if (!normalizedActiveHostnames.has(recordFqdn)) {

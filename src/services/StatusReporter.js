@@ -7,9 +7,10 @@ const logger = require('../utils/logger');
 const EventTypes = require('../events/EventTypes');
 
 class StatusReporter {
-  constructor(config, eventBus) {
+  constructor(config, eventBus, recordTracker) {
     this.config = config;
     this.eventBus = eventBus;
+    this.recordTracker = recordTracker;
     
     // Subscribe to status events
     this.setupEventSubscriptions();
@@ -80,7 +81,7 @@ class StatusReporter {
       const version = packageJson.version || '1.0.0';
       
       console.log(''); // Empty line for better readability
-      logger.info(`🚀 TRAEFIK DNS MANAGER v${version}`);
+      logger.info(`🚀 TráfegoDNS v${version}`);
       console.log(''); // Empty line for spacing
       
       // DNS Provider Section
@@ -123,6 +124,16 @@ class StatusReporter {
       logger.info(`  📊 Log Level: ${logger.levelNames[logger.level]}`);
       logger.info(`  🐳 Docker Events: ${this.config.watchDockerEvents ? 'Yes' : 'No'}`);
       logger.info(`  🧹 Cleanup Orphaned: ${this.config.cleanupOrphaned ? 'Yes' : 'No'}`);
+      
+      // Add preserved hostnames if available
+      if (this.recordTracker && this.recordTracker.preservedHostnames) {
+        if (this.recordTracker.preservedHostnames.length > 0) {
+          logger.info(`  🛡️ Preserved Hostnames: ${this.recordTracker.preservedHostnames.join(', ')}`);
+        } else {
+          logger.info(`  🛡️ Preserved Hostnames: None`);
+        }
+      }
+      
       console.log(''); // Empty line for spacing
       
       // Performance Section

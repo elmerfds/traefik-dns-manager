@@ -1,5 +1,5 @@
 /**
- * Main application entry point for Traefik DNS Manager
+ * Main application entry point for TráfegoDNS
  * Primary responsibility: Wire up the application components
  */
 const { ConfigManager } = require('./config');
@@ -42,9 +42,9 @@ async function start() {
     // Start main polling
     await traefikMonitor.startPolling();
     
-    logger.complete('Traefik DNS Manager running successfully');
+    logger.complete('TráfegoDNS running successfully');
   } catch (error) {
-    logger.error(`Failed to start Traefik DNS Manager: ${error.message}`);
+    logger.error(`Failed to start TráfegoDNS: ${error.message}`);
     process.exit(1);
   }
 }
