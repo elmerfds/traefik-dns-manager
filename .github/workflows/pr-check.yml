@@ -31,5 +31,5 @@ jobs:
       
       - name: Verify image builds successfully
         run: |
-          docker image inspect TrafegoDNS:pr-check
+          docker image inspect trafegodns:pr-check
           echo "✅ Docker image built successfully"
