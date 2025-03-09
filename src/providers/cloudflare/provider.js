@@ -12,7 +12,7 @@ class CloudflareProvider extends DNSProvider {
   constructor(config) {
     super(config);
     
-    logger.trace('CloudflareProvider.constructor: Initializing with config');
+    logger.trace('CloudflareProvider.constructor: Initialising with config');
     
     this.token = config.cloudflareToken;
     this.zone = config.cloudflareZone;
@@ -56,7 +56,7 @@ class CloudflareProvider extends DNSProvider {
       logger.success('Cloudflare zone authenticated successfully');
       
       // Initialize the DNS record cache
-      logger.trace('CloudflareProvider.init: Initializing DNS record cache');
+      logger.trace('CloudflareProvider.init: Initialising DNS record cache');
       await this.refreshRecordCache();
       
       return true;
@@ -77,7 +77,7 @@ class CloudflareProvider extends DNSProvider {
       logger.debug('Refreshing DNS record cache from Cloudflare');
       
       if (!this.zoneId) {
-        logger.trace('CloudflareProvider.refreshRecordCache: No zoneId, initializing first');
+        logger.trace('CloudflareProvider.refreshRecordCache: No zoneId, initialising first');
         await this.init();
         return;
       }
@@ -192,7 +192,7 @@ class CloudflareProvider extends DNSProvider {
         logger.trace(`CloudflareProvider.listRecords: Bypassing cache due to filters: ${JSON.stringify(params)}`);
         
         if (!this.zoneId) {
-          logger.trace('CloudflareProvider.listRecords: No zoneId, initializing first');
+          logger.trace('CloudflareProvider.listRecords: No zoneId, initialising first');
           await this.init();
         }
         
@@ -242,7 +242,7 @@ class CloudflareProvider extends DNSProvider {
     
     try {
       if (!this.zoneId) {
-        logger.trace('CloudflareProvider.createRecord: No zoneId, initializing first');
+        logger.trace('CloudflareProvider.createRecord: No zoneId, initialising first');
         await this.init();
       }
       
@@ -252,7 +252,7 @@ class CloudflareProvider extends DNSProvider {
       // Add management comment
       const recordWithComment = {
         ...record,
-        comment: 'Managed by TráfegoDNS'
+        comment: 'Managed by Traefik DNS Manager'
       };
       
       // Convert to Cloudflare format if needed
@@ -297,7 +297,7 @@ class CloudflareProvider extends DNSProvider {
     
     try {
       if (!this.zoneId) {
-        logger.trace('CloudflareProvider.updateRecord: No zoneId, initializing first');
+        logger.trace('CloudflareProvider.updateRecord: No zoneId, initialising first');
         await this.init();
       }
       
@@ -352,7 +352,7 @@ class CloudflareProvider extends DNSProvider {
     
     try {
       if (!this.zoneId) {
-        logger.trace('CloudflareProvider.deleteRecord: No zoneId, initializing first');
+        logger.trace('CloudflareProvider.deleteRecord: No zoneId, initialising first');
         await this.init();
       }
       
