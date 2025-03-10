@@ -540,6 +540,18 @@ docker run -d \
   traefik-dns-manager
 ```
 
+## Development
+
+This project utilised AI-assisted development:
+
+- Core concept, architecture, and management by the project author
+- Implementation assistance from Claude AI
+- A collaborative blend of human domain expertise with AI capabilities
+
+## Inspired by:
+- [cloudflare-dns-swarm](https://github.com/MarlBurroW/cloudflare-dns-swarm)
+- [docker-traefik-cloudflare-companion](https://github.com/tiredofit/docker-traefik-cloudflare-companion/)
+
 ## Licence
 
 MIT
